@@ -13,6 +13,7 @@ TurboGive moves items between your characters using rules in `turboloot.ini`. Yo
 - Target the character who should receive the item
 - Pick up the item (from inventory or loot)
 - Run: `/mac turbogive add` (or `/mac turbogive add target`)
+- or pre configure them in your INI with a good text editor like [Notepad++](https://notepad-plus-plus.org/downloads/) or [VSCodium](https://vscodium.com/)
 
 Repeat for each item/character pair. TurboGive writes these to `turboloot.ini` under `[GiveList]`.
 
