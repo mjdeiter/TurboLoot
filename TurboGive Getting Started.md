@@ -95,6 +95,19 @@ Bank pulls into bags (or tell others to pull).
 
 ---
 
+## Excluding items (wildcard / prefix only)
+
+If an item matches a `[GiveList]` **_prefix** pattern or shared **`[Wildcards]`** rules but you **do not** want TurboGive to move it, add a **`[GiveExclude]`** section in `turboloot.ini`:
+
+```ini
+[GiveExclude]
+_list=Tome of Nife's Mercy|Some Other Item
+```
+
+Use **exact** in-game names, separated by **`|`**. This only blocks **pattern** matches; a normal **`ItemName=Receiver`** line under `[GiveList]` still assigns that item. `/mac turbogive status` shows your `_list` when set.
+
+---
+
 ## Tips
 - **Aliases** - Create aliases (e.g. `/tg` for `/mac turbogive`) for faster use
 - **Shared INI** - TurboGive uses the same `turboloot.ini` as TurboLoot
