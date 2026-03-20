@@ -13,7 +13,6 @@ TurboGive moves items between your characters using rules in `turboloot.ini`. Yo
 - Target the character who should receive the item
 - Pick up the item (from inventory or loot)
 - Run: `/mac turbogive add` (or `/mac turbogive add target`)
-- or pre configure them in your INI with a good text editor like [Notepad++](https://notepad-plus-plus.org/downloads/) or [VSCodium](https://vscodium.com/)
 
 Repeat for each item/character pair. TurboGive writes these to `turboloot.ini` under `[GiveList]`.
 
@@ -110,6 +109,6 @@ Use **exact** in-game names, separated by **`|`**. This only blocks **pattern** 
 ---
 
 ## Tips
-- **Aliases** - Create aliases (e.g. `/tg` for `/mac turbogive`) in your MacroQuest.ini file for faster use
+- **Aliases** - Create aliases (e.g. `/tg` for `/mac turbogive`) for faster use
 - **Shared INI** - TurboGive uses the same `turboloot.ini` as TurboLoot
 - **Help** - Run `/mac turbogive help` anytime for the full command list
