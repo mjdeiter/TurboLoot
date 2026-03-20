@@ -6,13 +6,20 @@
 
 > **TurboLoot** - Automated INI based corpse looting, selling, banking, tributing, and destroying for EverQuest EMUs (E3Next / MacroQuest)
 
+**On this page:** [Download](#-download) · [Install](#1-installation-2-minutes) · [How loot chooses](#2-how-turboloot-decides-what-to-loot) · [INI](#3-the-ini-at-a-glance) · [Commands](#4-commands) · [TurboKey / TurboGive](#5-turbokey--turbogive-quick-tag--handouts) · [Workflow](#6-typical-workflow) · [Auto-loot](#7-auto-looting-setup-e3next) · [Multi-looter](#8-multiple-looters) · [Wildcards](#9-wildcards) · [Tips](#10-tips)
+
 ## 📥 Download
 
 For most users, the easiest way to get started is to download the latest release:
 
 👉 https://github.com/drel-git/TurboLoot/releases/latest
 
-This includes the latest macros and a starter INI.
+This includes the latest macros and INI files:
+
+- **`TurboLoot.ini`**- minimal **template** (safe starting point).
+- **`Example TurboLoot.ini`**- **heavy sample** with lots of items; use for ideas or diff against your own INI.
+
+Rename or copy the template to **`turboloot.ini`** where TurboLoot expects it (`Config` or `Macros`- see [Install](#1-installation-2-minutes)).
 
 ---
 
@@ -21,16 +28,20 @@ This includes the latest macros and a starter INI.
 | File | What It Does |
 |---|---|
 | `TurboLoot.mac` | The main macro - runs all looting and inventory management |
+| `TurboGive.mac` | Companion macro - distributes items between characters using `[GiveList]` in the same INI |
 | `TurboKey.mac` | Quick-tag helper - pick up an item, run one command, and it's categorized in your INI |
-| `TurboLoot.ini` | Your personal rulebook - tells TurboLoot what to keep, sell, bank, tribute, trash, or ignore example INI |
+| `TurboLoot.ini` | **Starter template**- copy to Config/Macros as `turboloot.ini` and customize |
+| `Example TurboLoot.ini` | **Large sample**- same layout with many `[ItemLimits]` / `[GiveList]` examples |
+| `TurboGive Getting Started.md` | TurboGive quick start + full command tables |
+| `PATCH_NOTES.md` | Release highlights, plain-English `FastLootMode` explanation, and TurboGive overview |
 
 ---
 
 ## 1. Installation (2 Minutes)
 
-1. Drop **`TurboLoot.mac`** and **`TurboKey.mac`** into your MQ **`Macros`** folder (or **`Config`** folder - the macro checks both).
-2. Drop **`TurboLoot.ini`** into the same folder.
-3. In-game, type: `/mac TurboLoot` - if it runs without errors, you're set.
+1. Drop **`TurboLoot.mac`**, **`TurboKey.mac`**, and (if you use handouts) **`TurboGive.mac`** into your MQ **`Macros`** folder (or **`Config`** - TurboLoot checks both for the INI path; the `.mac` files usually live in **`Macros`** per your MQ setup).
+2. Copy **`TurboLoot.ini`** (template) to **`turboloot.ini`** in **`Config`** (preferred) or **`Macros`**. TurboLoot and TurboKey load **`../Config/turboloot.ini`** first, then **`../Macros/turboloot.ini`**. (Optional: browse **`Example TurboLoot.ini`** for a filled-out reference.)
+3. In-game, type: `/mac TurboLoot` - if it runs without errors, you're set. Use `/mac TurboGive help` to verify TurboGive if you installed it.
 
 ---
 
@@ -49,7 +60,14 @@ TurboLoot checks items in this order:
 
 ## 3. The INI at a Glance
 
-The INI has two sections: **`[Settings]`** and **`[ItemLimits]`**.
+One file, several sections:
+
+| Section | Used by | Purpose |
+|---------|---------|---------|
+| `[Settings]` | TurboLoot | Radius, announcements, `FastLootMode`, sell/bank toggles, etc. |
+| `[Wildcards]` | TurboLoot | Prefix rules for spells, skills, tomes, customs - [§9 Wildcards](#9-wildcards) |
+| `[ItemLimits]` | TurboLoot, TurboKey | Per-item loot rules (`SELL`, `BANK`, …) |
+| `[GiveList]` | TurboGive | Who receives which items / patterns - see [§5](#5-turbokey--turbogive-quick-tag--handouts) and **[`TurboGive Getting Started.md`](TurboGive%20Getting%20Started.md)** |
 
 ### [Settings] - Recommended Defaults
 
@@ -59,7 +77,10 @@ The INI has two sections: **`[Settings]`** and **`[ItemLimits]`**.
 lootRadiusFeet=100
 inventoryWarnSlots=5
 debug=OFF
-LogToFile=ON
+logToFile=OFF
+; logLevel: DEBUG, INFO, WARN, or ERROR. Controls minimum level written to file when logToFile=ON.
+; DEBUG=everything, INFO=operations (default), WARN=warnings only, ERROR=errors only.
+; logLevel=INFO
 
 ; --Looting & Selling Rules--
 lootHighValueMinPP=50
@@ -67,22 +88,25 @@ lootStackableMinPP=50
 sellUnlistedStackable=OFF
 sellUnlistedItems=OFF
 sellWildcards=OFF
-bankWildcards=OFF
-StopLootWhenAttacked=ON
+bankWildcards=ON
+StopLootWhenAttacked=OFF
 returnToLeader=ON
-corpseHideMode=LOOTED
+dropLevBeforeNav=OFF
+; OFF = default (reliable). Set ON for more aggressive timing if your setup handles it.
+FastLootMode=OFF
 
-; --Announcements (where messages go)--
+; --Announcements--
 announceDefaultTo=e3bc
+announceDoneLootingTo=e3bc
 announceSkipTo=gsay
 announceBankSellPerItem=ON
 announceLoot=ON
 announceDestroy=ON
 announceRunSummary=ON
 autoRsayInRaid=OFF
-announceDoneLootingTo=e3bc
 
 ; --Advanced--
+corpseHideMode=LOOTED
 lootNoDropPrompt=never
 lootNoDropPromptReset=always
 ```
@@ -93,8 +117,8 @@ lootNoDropPromptReset=always
 |---|---|---|
 | `lootRadiusFeet` | 100 | How far (in feet) TurboLoot will search for corpses |
 | `inventoryWarnSlots` | 5 | Warns you when you have this many free inventory slots left |
-| `debug` | OFF | Enable debug output |
-| `LogToFile` | ON | Write debug log to `Logs/TurboLoot.mac.log` |
+| `debug` | OFF | Enable debug output (echo) |
+| `logToFile` | OFF | Append to `Logs/TurboLoot.mac.log` when ON (see also `logLevel` in sample INI) |
 | `lootHighValueMinPP` | 50 | Loot non-stackables worth ≥ this many pp. `0` = disabled |
 | `lootStackableMinPP` | 50 | Same but for stackable items |
 | `sellUnlistedStackable` | OFF | When selling, also sell unlisted stackable items |
@@ -103,18 +127,18 @@ lootNoDropPromptReset=always
 | `bankWildcards` | ON | Auto-bank wildcard items unless marked otherwise |
 | `StopLootWhenAttacked` | OFF | Stop looting if hostile mobs are detected nearby |
 | `returnToLeader` | ON | Return to group leader after looting |
-| `corpseHideMode` | ALL | Who corpses are hidden from: `LOOTED`, `ALL`, `GROUP`, `SELF`, `OFF` |
+| `corpseHideMode` | LOOTED | After loot: `LOOTED`, `ALL`, `GROUP`, `SELF`, or `OFF` - see sample INI comments |
 | `announceDefaultTo` | e3bc | Where messages go: `echo`, `e3bc`, `say`, `gsay`, `rsay`, `t CharName` |
-| `announceSkipTo` | gsay | Where skip messages go — `gsay` lets your group see what was left behind - use gsay if you use the LazBiS lua |
+| `announceSkipTo` | gsay | Where skip messages go - `gsay` lets your group see what was left behind - use gsay if you use the LazBiS lua |
 | `announceBankSellPerItem` | ON | Announce each item individually during bank/sell/tribute operations |
 | `announceLoot` | ON | Announce when items are looted |
 | `announceDestroy` | ON | Announce when items are destroyed |
 | `announceRunSummary` | ON | Show a summary at the end of each loot run |
 | `autoRsayInRaid` | OFF | Auto-switch announcements to `/rsay` when in a raid |
-| `announceDoneLootingTo` | e3bc | Where DONE LOOTING messages go:  `echo`, `e3bc`, `say`, `gsay`, `rsay`, `t CharName` |
+| `announceDoneLootingTo` | e3bc | Where DONE LOOTING messages go: `echo`, `e3bc`, `say`, `gsay`, `rsay`, `t CharName`. **Solo:** **`echo`**, `t`/`tell`, **`say`**, **`rsay`**; **`gsay`** / **`e3bc`** need a group. Use a **space** after `t` / `tell`. |
 | `lootNoDropPrompt` | never | No-drop behavior: `prompt` (ask), `always` (grab it), `never` (leave it) |
 | `lootNoDropPromptReset` | always | Whether to reset no-drop prompt setting after each run |
-| `FastLootMode` | ON | Use fast looting method. Set to OFF if experiencing loot issues on laggy servers |
+| `FastLootMode` | OFF | Default OFF for reliability. Set ON for faster, more aggressive loot timing |
 
 ### [ItemLimits] - Your Loot Rules
 
@@ -133,7 +157,7 @@ Item Name=RULE
 | `BANK` | Loot it, then bank it when you run the bank command |
 | `TRIBUTE` | Loot it, then tribute it when you run the tribute command |
 | `DESTROY` | Loot it and destroy it immediately |
-| `IGNORE` | Skip it completely - no announcement, no looting |
+| `IGNORE` | Skipped on corpses (not looted). Skip lines may still go to your **announce skip** channel if configured. |
 
 > **Note:** `ALL` still works as a legacy alias for `KEEP`, but `KEEP` is the preferred keyword going forward.
 
@@ -161,9 +185,11 @@ Use `/e3bct LOOTERCHARACTERNAME` before any command below to have a bot run it i
 | `/mac turboloot sell` | Sells all items marked `SELL` (must be at a vendor) |
 | `/mac turboloot bank` | Banks all items marked `BANK` (must be at a banker) |
 | `/mac turboloot tribute` | Tributes all items marked `TRIBUTE` (must be at a tribute master) |
+| `/mac turboloot destroy` | Destroys items marked `DESTROY` (bags; main-inv slots may need moving - macro prints notices) |
 | `/mac turboloot unload` | **Full dump:** bank → tribute → sell → destroy (all in one when you're in town) |
+| `/mac turboloot sell dryrun` | Preview what *would* be sold (detailed; same family as `report`) |
 | `/mac turboloot report` | Preview what *would* be sold - no items are touched |
-| `/mac turboloot help` | Show the command list in-game |
+| `/mac turboloot help` | Show the full command list in-game |
 
 ### Set Up Aliases (Recommended)
 
@@ -177,34 +203,55 @@ Instead of typing the full commands every time, set up short aliases. Open your 
 /turbotribute=/squelch /mac turboloot tribute
 /turbounload=/squelch /mac turboloot unload
 /turboreport=/squelch /mac turboloot report
+/turbodestroy=/squelch /mac turboloot destroy
 /turbohelp=/squelch /mac turboloot help
+/tg=/squelch /mac turbogive
 ```
 
 Now you can just type `/turboloot`, `/turbosell`, `/turboreport`, etc.
 
 ---
 
-## 5. TurboKey - Tag Items on the Fly
+## 5. TurboKey & TurboGive (quick tag & handouts)
 
-### Instead of manually editing your INI, set up hotkeys for each rule. 
-Pick up an item, hit the hotkey, and it's tagged in your INI automatically.
+### TurboKey - tag items on the fly
+
+Instead of manually editing your INI, pick up an item and run:
+
 ```
 /mac TurboKey RULE
 ```
 
-Where `RULE` is one of: 
-- `/mac TurboKey KEEP`
-- `/mac TurboKey SELL`
-- `/mac TurboKey IGNORE`
-- `/mac TurboKey BANK`
-- `/mac TurboKey TRIBUTE`
-- `/mac TurboKey DESTROY`
+| Rule | Written to `[ItemLimits]` | What happens to the cursor item |
+|------|---------------------------|----------------------------------|
+| `KEEP` | Yes | `/autoinv` |
+| `ALL` | Yes (legacy alias for keep) | `/autoinv` |
+| `SELL` | Yes | `/autoinv` |
+| `BANK` | Yes | `/autoinv` |
+| `TRIBUTE` | Yes | `/autoinv` |
+| `IGNORE` | Yes | `/destroy` (confirmation if the game asks) |
+| `SKIP` | Stored as skip-like rule; TurboLoot treats like **IGNORE** for loot | `/destroy` (same as ignore for the item on cursor) |
+| `DESTROY` | Yes | `/destroy` (confirmation if the game asks) |
 
-**What happens:**
-- The item on your cursor gets written into `turboloot.ini` under `[ItemLimits]` with that rule.
-- If the rule is `DESTROY` or `IGNORE`, the item is destroyed off your cursor.
-- For anything else, the item goes into your inventory via `/autoinv`.
-- If the item already had a rule, it gets overwritten and you'll see the old → new change in chat.
+Example: `/mac TurboKey SELL` - adds the cursor item as **`SELL`** and puts it in your bags.
+
+**Overwrite:** If that item name already had a rule, it’s replaced; chat shows **old → new**.
+
+---
+
+### TurboGive - handouts (optional)
+
+**TurboGive** uses the **same** `turboloot.ini` and writes **`[GiveList]`** (who gets what). It does **not** replace TurboLoot on corpses - it’s for moving loot to the right characters after the fact.
+
+| Do this | Command |
+|---------|---------|
+| Full in-repo guide | **[`TurboGive Getting Started.md`](TurboGive%20Getting%20Started.md)** |
+| Every command | `/mac TurboGive help` |
+| Add cursor item for **target** character | `/mac TurboGive add` |
+| Distribute to group (coordinated) | `/mac TurboGive` |
+| Collect from group | `/mac TurboGive collect` |
+
+**Patterns:** Only in **`[GiveList]`** lines like `_prefix1=Char:Spell:*` - **`Text*`**, **`*Text`**, **`*Text*`** - *not* in **`[Wildcards]`** (loot prefix-only). Details in **[`TurboGive Getting Started.md`](TurboGive%20Getting%20Started.md)**
 
 **Example:** You loot a "Cracked Staff" and want to sell them from now on:
 1. Pick it up (it's on your cursor)
@@ -226,10 +273,11 @@ Where `RULE` is one of:
 
 ## 7. Auto-Looting Setup (E3Next)
 
-Set up TurboLoot runs automatically to run automatically
+Set up TurboLoot to run automatically after kills
 
 ### Prerequisites
 - `TurboLoot.mac` and `turboloot.ini` are installed (you can verify with `/mac turboLoot`)
+- TurboLoot loads **`../Config/turboloot.ini` first**, otherwise **`../Macros/turboloot.ini`**. Debug/log lines show which file was used- edit **that** copy when changing settings (including `announceDoneLootingTo`).
 
 ### Step 1: Add the Event Trigger to Your Tank's E3Next INI
 
@@ -366,6 +414,8 @@ If all your looters should follow the same rules, you don't need any of this. Ju
 
 ## 9. Wildcards
 
+**TurboLoot `[Wildcards]`** only does **prefix matching** (name **starts with** your text). The **`Text*` / `*Text` / `*Text*`** pattern style exists **only** in **`[GiveList]` `_prefixN=Char:pattern`** for **TurboGive** (handouts), not for corpse looting-`*` in a `Wildcard1=` value is a **literal** character, not “ends with” or “contains.”
+
 The five defaults work exactly like before. To disable one, just change it to OFF:
 
 ```ini
@@ -419,7 +469,8 @@ Comment out or remove every line in `[Wildcards]`. TurboLoot will only loot item
 ## Notes
 
 - Wildcards match the **beginning** of item names only (prefix matching).
-- Matching is **case-insensitive** — `Spell:` matches "SPELL: Gate" and "Spell: Gate".
+- **Performance:** After `[Wildcards]` is loaded, TurboLoot builds a tiny first-letter index so items whose names **cannot** match any configured prefix skip the full wildcard walk. **Same idea as TurboGive**; results match the slower path and work with **`FastLootMode=ON` or `OFF`**. With `debug=ON`, startup logs may show `Wildcard first chars: ...`.
+- Matching is **case-insensitive** - `Spell:` matches "SPELL: Gate" and "Spell: Gate".
 - Items explicitly listed in `[ItemLimits]` always take priority over wildcard matching. If you set `Spell: Gate=IGNORE` in ItemLimits, it will be ignored even though it matches the `Spell:` wildcard.
 - The `bankWildcards` and `sellWildcards` settings in `[Settings]` still control what happens to wildcard-matched items during bank/sell operations.
 
@@ -434,3 +485,5 @@ Comment out or remove every line in `[Wildcards]`. TurboLoot will only loot item
 - **`IGNORE` is your friend** for spammy items you never want to see again (Bone Chips in your 50s, etc.).
 - **`/mac turboloot unload` is the town command.** Park near a banker, tribute master, and vendor, then run it to handle bank -> tribute -> sell -> destroy all at once.
 - **`bankWildcards=ON`** and **`sellWildcards=ON`** means spell scrolls, tomes, and skill-ups get auto banked or sold unless you've given them a different rule - great for alts.
+- **`logToFile=ON`** appends forever until you clear/rename the log (`/mqlog clear` in macro context, or delete `Logs/TurboLoot.mac.log`). See MacroQuest `/mqlog` docs.
+- **Feign:** TurboLoot won’t run while you’re feigned; it resumes when you stand.
