@@ -256,7 +256,7 @@ Example: `/mac TurboKey SELL` - adds the cursor item as **`SELL`** and puts it i
 **Example:** You loot a "Cracked Staff" and want to sell them from now on:
 1. Pick it up (it's on your cursor)
 2. Type `/mac TurboKey SELL`
-3. Done - next time TurboLoot sees a Cracked Staff, it marks it for selling.
+3. Done - next time TurboLoot sees a Cracked Staff, it marks it for selling and will auto sell when you /mac turboloot sell or /mac turboloot unload.
 
 ---
 
