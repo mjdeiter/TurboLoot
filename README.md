@@ -43,6 +43,9 @@ Rename or copy the template to **`turboloot.ini`** where TurboLoot expects it (`
 2. Copy **`TurboLoot.ini`** (template) to **`turboloot.ini`** in **`Config`** (preferred) or **`Macros`**. TurboLoot and TurboKey load **`../Config/turboloot.ini`** first, then **`../Macros/turboloot.ini`**. (Optional: browse **`Example TurboLoot.ini`** for a filled-out reference.)
 3. In-game, type: `/mac TurboLoot` - if it runs without errors, you're set. Use `/mac TurboGive help` to verify TurboGive if you installed it.
 
+
+<-------------------------------------> **I recommend using a good text editor like [Notepad++](https://notepad-plus-plus.org/downloads/) or [VSCodium](https://vscodium.com/)** <------------------------------------->
+
 ---
 
 ## 2. How TurboLoot Decides What to Loot
