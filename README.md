@@ -4,7 +4,7 @@
 
 # Quickstart Guide
 
-> **TurboLoot** - Automated INI based corpse looting, selling, banking, tributing, and destroying for EverQuest EMUs (E3Next / MacroQuest)
+> **TurboLoot** - Automated INI based corpse looting, selling, banking, tributing, destroying, collecting, distributing for EverQuest EMUs (E3Next / MacroQuest)
 
 **On this page:** [Download](#-download) · [Install](#1-installation-2-minutes) · [How loot chooses](#2-how-turboloot-decides-what-to-loot) · [INI](#3-the-ini-at-a-glance) · [Commands](#4-commands) · [TurboKey / TurboGive](#5-turbokey--turbogive-quick-tag--handouts) · [Workflow](#6-typical-workflow) · [Auto-loot](#7-auto-looting-setup-e3next) · [Multi-looter](#8-multiple-looters) · [Wildcards](#9-wildcards) · [Tips](#10-tips)
 
