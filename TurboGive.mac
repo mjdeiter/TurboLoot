@@ -6,7 +6,7 @@
 |   |____| |____/ |__|  |___  /\____/\______  /__| \_/  \___  > 
 |                            \/              \/              \/
 |              https://www.github.com/drel-git/TurboLoot
-|                       TurboGive.mac v1.5.1
+|                       TurboGive.mac v1.5.2
 | Companion to TurboLoot - item redistribution between characters
 |
 | =========================================================================================
@@ -34,6 +34,7 @@
 |   Exact items:  ItemName=CharName     (one per line, like [ItemLimits])
 |   Prefixes:     _prefix1=CharName:Spell:*   _prefix2=CharName:*Oleander  (up to 30)
 |   Wildcards:    _wildcards=CharName|OtherChar  (uses shared [Wildcards] rules)
+|   Exclusions:   [GiveExclude] _list=Exact Name|Other Name  (blocks prefix/wildcard only; exact ItemName= lines still give)
 |
 | ============================================================================================
 #turbo 100
@@ -1010,6 +1011,7 @@ Sub BankPull(string targetName)
     /if (${useWildcards}) {
         /call LoadWildcards
     }
+    /call LoadGiveExclude
 
     /declare itemsPulled int local 0
     /declare bankNum int local
@@ -1487,12 +1489,20 @@ Sub CheckBankItemMatch(string charName, string itemName, bool useWildcards)
 
     /if (${prefixList.Length}) {
         /call IsGivePrefix "${itemName}"
-        /if (${Macro.Return.Equal[TRUE]}) /return TRUE
+        /if (${Macro.Return.Equal[TRUE]}) {
+            /call IsGiveExcluded "${itemName}"
+            /if (${Macro.Return.Equal[TRUE]}) /return FALSE
+            /return TRUE
+        }
     }
 
     /if (${useWildcards} && ${Defined[wildcardPrefixes]} && ${wildcardPrefixes.Length}) {
         /call IsWildcardItem "${itemName}"
-        /if (${Macro.Return.Equal[TRUE]}) /return TRUE
+        /if (${Macro.Return.Equal[TRUE]}) {
+            /call IsGiveExcluded "${itemName}"
+            /if (${Macro.Return.Equal[TRUE]}) /return FALSE
+            /return TRUE
+        }
     }
 
 /return FALSE
@@ -1566,6 +1576,7 @@ Sub GiveToTarget(string targetName)
     /if (${useWildcards}) {
         /call LoadWildcards
     }
+    /call LoadGiveExclude
 
     /if (${showDebug} || ${logToFile}) {
         /call LogDebug "[turboGive] Prefix patterns for ${charName}: ${prefixList}"
@@ -1681,7 +1692,8 @@ Sub GiveToTarget(string targetName)
             /if (!${matched} && ${prefixList.Length}) {
                 /call IsGivePrefix "${itemName}"
                 /if (${Macro.Return.Equal[TRUE]}) {
-                    /varset matched TRUE
+                    /call IsGiveExcluded "${itemName}"
+                    /if (!${Macro.Return.Equal[TRUE]}) /varset matched TRUE
                 }
             }
 
@@ -1689,7 +1701,8 @@ Sub GiveToTarget(string targetName)
             /if (!${matched} && ${useWildcards} && ${Defined[wildcardPrefixes]} && ${wildcardPrefixes.Length}) {
                 /call IsWildcardItem "${itemName}"
                 /if (${Macro.Return.Equal[TRUE]}) {
-                    /varset matched TRUE
+                    /call IsGiveExcluded "${itemName}"
+                    /if (!${Macro.Return.Equal[TRUE]}) /varset matched TRUE
                 }
             }
 
@@ -2371,6 +2384,11 @@ Sub PrintStatus
         /echo ${tgTag} \awWildcards: \ayNone\ax
     }
 
+    /declare excludeRaw string local ${Ini[${iniFile},GiveExclude,_list]}
+    /if (${excludeRaw.Length} && !${excludeRaw.Equal[NULL]}) {
+        /echo ${tgTag} \aw[GiveExclude] _list: \ag${excludeRaw}\ax
+    }
+
     | List all recipients and zone status
     /echo ${tgTag} \au---- \agRECIPIENTS \au----\ax
     /declare remaining string local ${recipients.Right[-1]}
@@ -2494,6 +2512,7 @@ Sub PrintHelp
     /echo \aw    \ag_prefix1=\atCharName\ax\ag:Spell:*\ax \aw(starts with)\ax
     /echo \aw    \ag_prefix2=\atCharName\ax\ag:*Suffix\ax \aw(ends with)\ax
     /echo \aw    \ag_wildcards=\atCharName\ax\ag|\atOtherChar\ax \aw([Wildcards])\ax
+    /echo \aw  \ag[GiveExclude]\ax \ag_list=\atName\ax\ag|\atName\ax \aw(exclude from prefix/wildcard only)\ax
     /echo \at----------------------------\ax
     /echo \ap** \awAliases are recommended \ap**\ax
     /echo \aghttps://www.github.com/drel-git/TurboLoot\ax \awfor more info\ax
@@ -2658,6 +2677,45 @@ Sub IsWildcardItem(string name)
     /if (${u.Left[${wcPrefixLen}].Equal[${wcPrefix}]}) /return TRUE
 
     /goto :nextWildcard
+/return FALSE
+
+| Optional [GiveExclude] _list=Name1|Name2 — blocks GiveList _prefix and [Wildcards] matches only (exact ItemName=Char still gives).
+Sub LoadGiveExclude
+    /if (!${Defined[giveExcludePipe]}) {
+        /declare giveExcludePipe string outer
+    }
+    /varset giveExcludePipe |
+    /declare raw string local ${Ini[${iniFile},GiveExclude,_list]}
+    /if (!${raw.Length} || ${raw.Equal[NULL]}) /return
+
+    /declare rem string local ${raw}
+    /declare pipePos int local 0
+    /declare piece string local
+    /declare pUpper string local
+
+:nextGiveExcludePiece
+    /if (!${rem.Length}) /return
+    /varset pipePos ${rem.Find[|]}
+    /if (${pipePos}) {
+        /varset piece ${rem.Left[${Math.Calc[${pipePos}-1]}]}
+        /varset rem ${rem.Mid[${Math.Calc[${pipePos}+1]},2048]}
+    } else {
+        /varset piece ${rem}
+        /varset rem
+    }
+    /if (${piece.Length}) {
+        /varset pUpper ${piece.Upper}
+        /if (!${giveExcludePipe.Find[|${pUpper}|]}) {
+            /varset giveExcludePipe ${giveExcludePipe}${pUpper}|
+        }
+    }
+    /goto :nextGiveExcludePiece
+
+Sub IsGiveExcluded(string itemName)
+    /if (!${Defined[giveExcludePipe]}) /return FALSE
+    /if (${giveExcludePipe.Length} < 3) /return FALSE
+    /declare u string local ${itemName.Upper}
+    /if (${giveExcludePipe.Find[|${u}|]}) /return TRUE
 /return FALSE
 
 | Loads shared wildcard prefixes from [Wildcards] section in turboloot.ini
