@@ -32,7 +32,7 @@ Rename or copy the template to **`turboloot.ini`** where TurboLoot expects it (`
 | `TurboKey.mac` | Quick-tag helper - pick up an item, run one command, and it's categorized in your INI |
 | `TurboLoot.ini` | **Starter template**- copy to Config/Macros as `turboloot.ini` and customize |
 | `Example TurboLoot.ini` | **Large sample**- same layout with many `[ItemLimits]` / `[GiveList]` examples |
-| `TurboGive Getting Started.md` | TurboGive quick start + full command tables |
+| [`TurboGive Getting Started.md`](https://github.com/drel-git/TurboLoot/blob/main/TurboGive%20Getting%20Started.md) | TurboGive quick start + full command tables |
 | `PATCH_NOTES.md` | Release highlights, plain-English `FastLootMode` explanation, and TurboGive overview |
 
 ---
