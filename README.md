@@ -191,7 +191,7 @@ Use `/e3bct LOOTERCHARACTERNAME` before any command below to have a bot run it i
 | `/mac turboloot report` | Preview what *would* be sold - no items are touched |
 | `/mac turboloot help` | Show the full command list in-game |
 
-### Set Up Aliases (Recommended)
+### 4.1 Set Up Aliases (Recommended)
 
 Instead of typing the full commands every time, set up short aliases. Open your **`MacroQuest.ini`** in your E3Next Config folder and add these under `[Aliases]`:
 
@@ -268,6 +268,7 @@ Example: `/mac TurboKey SELL` - adds the cursor item as **`SELL`** and puts it i
 4. **When bags are full**, head to town:
    - Run `/turbounload` near a banker, tribute master, and vendor to handle everything at once
    - Or run the individual commands (`/turbobank`, `/turbotribute`, `/turbosell`) one at a time
+  (note: remember to set up Aliases in your MacroQuest.ini and hotkeys for ease of use)
 
 ---
 
@@ -468,8 +469,8 @@ Comment out or remove every line in `[Wildcards]`. TurboLoot will only loot item
 
 ## Notes
 
-- Wildcards match the **beginning** of item names only (prefix matching).
-- **Performance:** After `[Wildcards]` is loaded, TurboLoot builds a tiny first-letter index so items whose names **cannot** match any configured prefix skip the full wildcard walk. **Same idea as TurboGive**; results match the slower path and work with **`FastLootMode=ON` or `OFF`**. With `debug=ON`, startup logs may show `Wildcard first chars: ...`.
+- Wildcards for looting match the **beginning** of item names only (prefix matching).
+- **Performance:** After `[Wildcards]` is loaded, TurboLoot builds a tiny first-letter index so items whose names **cannot** match any configured prefix skip the full wildcard walk
 - Matching is **case-insensitive** - `Spell:` matches "SPELL: Gate" and "Spell: Gate".
 - Items explicitly listed in `[ItemLimits]` always take priority over wildcard matching. If you set `Spell: Gate=IGNORE` in ItemLimits, it will be ignored even though it matches the `Spell:` wildcard.
 - The `bankWildcards` and `sellWildcards` settings in `[Settings]` still control what happens to wildcard-matched items during bank/sell operations.
@@ -485,5 +486,4 @@ Comment out or remove every line in `[Wildcards]`. TurboLoot will only loot item
 - **`IGNORE` is your friend** for spammy items you never want to see again (Bone Chips in your 50s, etc.).
 - **`/mac turboloot unload` is the town command.** Park near a banker, tribute master, and vendor, then run it to handle bank -> tribute -> sell -> destroy all at once.
 - **`bankWildcards=ON`** and **`sellWildcards=ON`** means spell scrolls, tomes, and skill-ups get auto banked or sold unless you've given them a different rule - great for alts.
-- **`logToFile=ON`** appends forever until you clear/rename the log (`/mqlog clear` in macro context, or delete `Logs/TurboLoot.mac.log`). See MacroQuest `/mqlog` docs.
-- **Feign:** TurboLoot won’t run while you’re feigned; it resumes when you stand.
+- **`logToFile=ON`** appends forever until you clear/rename the log (`/mqlog clear` in macro context, or delete `Logs/TurboLoot.mac.log`). Use only when encountering issues and send me the log for help.
