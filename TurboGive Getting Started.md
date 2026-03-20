@@ -109,6 +109,6 @@ Use **exact** in-game names, separated by **`|`**. This only blocks **pattern** 
 ---
 
 ## Tips
-- **Aliases** - Create aliases (e.g. `/tg` for `/mac turbogive`) for faster use
+- **Aliases** - Create aliases (e.g. `/tg` for `/mac turbogive`) in your MacroQuest.ini file for faster use
 - **Shared INI** - TurboGive uses the same `turboloot.ini` as TurboLoot
 - **Help** - Run `/mac turbogive help` anytime for the full command list
