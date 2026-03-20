@@ -1,0 +1,2973 @@
+|   *  *  *  *  *  *  *  *  *  *  [  T u r b o G i v e  ]  *  *  *  *  *  *  *  *  *  *
+| ___________          ___.           _________ __               
+| \__    ___/_ ________\_ |__   ____ /  _____/|__|__  __ ____   
+|   |    | |  |  \_  __ \ __ \ /  _ \   \  ___|  \  \/ // __ \  
+|   |    | |  |  /|  | \/ \_\ (  <_> )    \_\  \  |\   /\  ___/  
+|   |____| |____/ |__|  |___  /\____/\______  /__| \_/  \___  > 
+|                            \/              \/              \/
+|              https://www.github.com/drel-git/TurboLoot
+|                       TurboGive.mac v1.5.1
+| Companion to TurboLoot - item redistribution between characters
+|
+| =========================================================================================
+|
+| Usage: /mac TurboGive                 (give to group + each group bot gives theirs)
+|        /mac TurboGive all              (give to all in zone + each e3 bot gives theirs)
+|        /mac TurboGive CHARNAME        (give my items to a specific character)
+|        /mac TurboGive hand COUNT      (pick up item, give COUNT to each group member)
+|        /mac TurboGive collect          (collect items from group)
+|        /mac TurboGive collect raid     (collect from all e3 bots)
+|        /mac TurboGive bank             (tell group to pull from bank; runner does not pull)
+|        /mac TurboGive bank solo        (pull my own items from bank only)
+|        /mac TurboGive bank all         (tell all e3 bots to pull; runner does not pull)
+|        /mac TurboGive bank pull        (pull my bank for others; or run when told)
+|        /mac TurboGive bank CHARNAME    (I pull CHARNAME's items from my bank)
+|        /mac TurboGive bank tell CHARNAME (tell CHARNAME to pull their own from their bank)
+|        /mac TurboGive tell CHARNAME       (tell CHARNAME to distribute their items)
+|        /mac TurboGive collect tell CHARNAME [all] (tell CHARNAME to collect)
+|        /mac TurboGive hand tell CHARNAME COUNT ItemName [all] (tell CHARNAME to hand out)
+|        /mac TurboGive add CHARNAME     (add cursor item to character's want-list)
+|        /mac TurboGive list CHARNAME    (show character's want-list)
+|        /mac TurboGive help             (show commands)
+|
+| INI FORMAT (in turboloot.ini [GiveList] section):
+|   Exact items:  ItemName=CharName     (one per line, like [ItemLimits])
+|   Prefixes:     _prefix1=CharName:Spell:*   _prefix2=CharName:*Oleander  (up to 30)
+|   Wildcards:    _wildcards=CharName|OtherChar  (uses shared [Wildcards] rules)
+|
+| ============================================================================================
+#turbo 100
+
+| =====================================================================
+| SEND DONE TO ORCHESTRATOR — used when bot finishes a broadcast task
+| Works whether grouped or not, leader or not. Orchestrator receives via e3bc.
+| =====================================================================
+Sub SendDoneToOrchestrator
+    /if (${Me.Grouped} && ${Group.Leader.Name.Length} && !${Group.Leader.Name.Equal[NULL]} && !${Group.Leader.Name.Equal[${Me.Name}]}) {
+        /squelch /e3bc /echo [turboGive] DONE ${Me.Name}->${Group.Leader.Name}
+        /squelch /e3bct ${Group.Leader.Name} /echo [turboGive] SIGNAL_DONE ${Me.Name}
+    } else {
+        | Not grouped, or we're group leader — broadcast to ALL so orchestrator receives it
+        /squelch /e3bc /echo [turboGive] DONE ${Me.Name}->ALL
+    }
+/return
+
+| =====================================================================
+| EVENT HANDLERS
+| =====================================================================
+#event CharDone "[turboGive] SIGNAL_DONE #1#"
+#event CharDoneBC "[turboGive] DONE #1#->#2#"
+#event CharDoneTell "#1# tells you, 'Done sending you items'"
+#event TradeCancelled "Trade cancelled."
+#event TradeComplete "The trade has been completed."
+#event TooFar "You are too far away from #1# to trade."
+
+| =====================================================================
+| MAIN
+| =====================================================================
+Sub Main(string modeIn, string argIn)
+    /declare mode string local ${modeIn}
+    /declare arg string local ${argIn}
+    /declare modeUpper string local ${mode.Upper.Replace[ ,]}
+
+    /if (${modeUpper.Equal[HELP]} || ${modeUpper.Equal[COMMANDS]}) {
+        /call PrintHelp
+        /return
+    }
+
+    /if (!${Defined[tgTag]}) {
+        /declare tgTag string outer \at[turboGive]\ax
+    }
+
+    /if (!${Defined[iniFile]}) {
+        /declare iniFile string outer ../Config/turboloot.ini
+    } else {
+        /varset iniFile ../Config/turboloot.ini
+    }
+    /if (!${Ini.File[${iniFile}].Exists}) {
+        /varset iniFile ../Macros/turboloot.ini
+    }
+    /if (!${Ini.File[${iniFile}].Exists}) {
+        /echo ${tgTag} \arERROR: Cannot find turboloot.ini in Config or Macros folder.
+        /return
+    }
+
+    /if (!${Defined[showDebug]}) {
+        /declare showDebug bool outer FALSE
+    } else {
+        /varset showDebug FALSE
+    }
+    /if (!${Defined[logToFile]}) {
+        /declare logToFile bool outer FALSE
+    } else {
+        /varset logToFile FALSE
+    }
+    /declare debugSetting string local ${Ini[${iniFile},Settings,debug]}
+    /if (${debugSetting.Length} && !${debugSetting.Equal[NULL]}) {
+        /declare debugUpper string local ${debugSetting.Upper.Replace[ ,]}
+        /if (${debugUpper.Equal[ON]} || ${debugUpper.Equal[TRUE]} || ${debugUpper.Equal[YES]} || ${debugUpper.Equal[1]}) {
+            /varset showDebug TRUE
+        }
+    }
+    /declare logSetting string local ${Ini[${iniFile},Settings,logToFile]}
+    /if (${logSetting.Length} && !${logSetting.Equal[NULL]}) {
+        /declare logUpper string local ${logSetting.Upper.Replace[ ,]}
+        /if (${logUpper.Equal[ON]} || ${logUpper.Equal[TRUE]} || ${logUpper.Equal[YES]} || ${logUpper.Equal[1]}) {
+            /varset logToFile TRUE
+        }
+    }
+    /if (!${Defined[logLevel]}) {
+        /declare logLevel int outer 1
+    } else {
+        /varset logLevel 1
+    }
+    /declare logLevelSetting string local ${Ini[${iniFile},Settings,logLevel]}
+    /if (${logLevelSetting.Length} && !${logLevelSetting.Equal[NULL]}) {
+        /declare logLevelUpper string local ${logLevelSetting.Upper.Replace[ ,]}
+        /if (${logLevelUpper.Equal[DEBUG]}) /varset logLevel 0
+        /if (${logLevelUpper.Equal[INFO]}) /varset logLevel 1
+        /if (${logLevelUpper.Equal[WARN]}) /varset logLevel 2
+        /if (${logLevelUpper.Equal[ERROR]}) /varset logLevel 3
+    }
+
+    /if (!${Defined[announceMethod]}) {
+        /declare announceMethod string outer e3bc
+    } else {
+        /varset announceMethod e3bc
+    }
+    /declare announceSetting string local ${Ini[${iniFile},Settings,announceDefaultTo]}
+    /if (${announceSetting.Length} && !${announceSetting.Equal[NULL]}) {
+        /varset announceMethod ${announceSetting}
+    }
+
+    | ---- ADD ----
+    /if (${modeUpper.Equal[ADD]}) {
+        /if (${arg.Length} && !${arg.Equal[NULL]}) {
+            /if (${arg.Upper.Equal[TARGET]}) {
+                /if (${Target.ID} && ${Target.Type.Equal[PC]}) {
+                    /call AddItemToGiveList "${Target.CleanName}"
+                } else {
+                    /echo ${tgTag} \arNo valid PC target selected.
+                }
+            } else {
+                /call AddItemToGiveList "${arg}"
+            }
+        } else {
+            /if (${Target.ID} && ${Target.Type.Equal[PC]}) {
+                /call AddItemToGiveList "${Target.CleanName}"
+            } else {
+                /echo ${tgTag} \arUsage: /mac turbogive add CHARNAME  (or target a PC)
+            }
+        }
+        /return
+    }
+
+    | ---- LIST ----
+    /if (${modeUpper.Equal[LIST]}) {
+        /if (${arg.Length} && !${arg.Equal[NULL]}) {
+            /if (${arg.Upper.Equal[TARGET]} || ${arg.Upper.Equal[T]}) {
+                /if (${Target.ID} && ${Target.Type.Equal[PC]}) {
+                    /call PrintGiveList "${Target.CleanName}"
+                } else {
+                    /echo ${tgTag} \arNo valid PC target selected.
+                }
+            } else {
+                /call PrintGiveList "${arg}"
+            }
+        } else {
+            /call PrintGiveList "${Me.Name}"
+        }
+        /return
+    }
+
+    | ---- COLLECT ----
+    /if (${modeUpper.Equal[COLLECT]}) {
+        /if (${arg.Upper.Equal[TELL]}) {
+            /if (!${Param2.Length} || ${Param2.Equal[NULL]}) {
+                /echo ${tgTag} \arUsage: /mac turbogive collect tell CHARNAME \aw[\agall\aw]\ax
+                /return
+            }
+            /declare collectTellTarget string local ${Param2}
+            /declare collectScope string local
+            /if (${Param3.Length} && (${Param3.Upper.Equal[ALL]} || ${Param3.Upper.Equal[RAID]})) /varset collectScope all
+            /if (${collectScope.Length}) {
+                /echo ${tgTag} \ao[COLLECT]\aw Telling \ag${collectTellTarget}\aw to collect from all e3 bots...
+                /squelch /e3bct ${collectTellTarget} /mac turbogive collect all
+            } else {
+                /echo ${tgTag} \ao[COLLECT]\aw Telling \ag${collectTellTarget}\aw to collect from group...
+                /squelch /e3bct ${collectTellTarget} /mac turbogive collect
+            }
+        } else {
+            /call CollectFromGroup "${arg}"
+        }
+        /return
+    }
+
+    | ---- ALL (deliver to all in zone + tell all e3 bots to deliver) ----
+    /if (${modeUpper.Equal[ALL]} || ${modeUpper.Equal[DISTRIBUTEALL]}) {
+        /call DeliverEveryone "ALL"
+        /return
+    }
+
+    | ---- ZONE (deliver to all in zone, no group filter — used internally) ----
+    /if (${modeUpper.Equal[ZONE]}) {
+        /call DeliverAll
+        /call SendDoneToOrchestrator
+        /return
+    }
+
+    | ---- GROUP (deliver to group only — used internally by broadcast) ----
+    /if (${modeUpper.Equal[GROUP]}) {
+        /call DeliverAll "GROUP"
+        /call SendDoneToOrchestrator
+        /return
+    }
+
+    | ---- STATUS ----
+    /if (${modeUpper.Equal[STATUS]}) {
+        /call PrintStatus
+        /return
+    }
+
+    | ---- HAND ----
+    /if (${modeUpper.Equal[HAND]} || ${modeUpper.Equal[HANDOUT]} || ${modeUpper.Equal[DISTRIBUTE]}) {
+        /if (${arg.Upper.Equal[TELL]} && ${Param2.Length} && !${Param2.Equal[NULL]} && ${Int[${Param3}]} > 0) {
+            /declare handTellTarget string local ${Param2}
+            /declare handTellCount int local ${Int[${Param3}]}
+            /declare handTellItemArg string local
+            /declare handTellScope string local
+            /declare hpIdx int local
+            /for hpIdx 4 to 9
+                /if (${Param${hpIdx}.Length} && !${Param${hpIdx}.Equal[NULL]}) {
+                    /if (${Param${hpIdx}.Upper.Equal[ALL]}) {
+                        /varset handTellScope all
+                    } else {
+                        /if (${handTellItemArg.Length}) {
+                            /varset handTellItemArg ${handTellItemArg} ${Param${hpIdx}}
+                        } else {
+                            /varset handTellItemArg ${Param${hpIdx}}
+                        }
+                    }
+                }
+            /next hpIdx
+            /if (${handTellItemArg.Length}) {
+                /if (${handTellScope.Length}) {
+                    /echo ${tgTag} \ag[HAND]\aw Telling \ag${handTellTarget}\aw to hand \ag${handTellCount}\aw x \at${handTellItemArg}\aw to all...
+                    /squelch /e3bct ${handTellTarget} /mac turbogive hand ${handTellCount} ${handTellItemArg} all
+                } else {
+                    /echo ${tgTag} \ag[HAND]\aw Telling \ag${handTellTarget}\aw to hand \ag${handTellCount}\aw x \at${handTellItemArg}\aw to group...
+                    /squelch /e3bct ${handTellTarget} /mac turbogive hand ${handTellCount} ${handTellItemArg}
+                }
+            } else {
+                /echo ${tgTag} \arUsage: /mac turbogive hand tell CHARNAME COUNT ItemName \aw(e.g. hand tell Drel 5 Diamond)\ax
+                /echo ${tgTag} \awAdd \agall\aw at end for zone-wide: hand tell Drel 5 Diamond all\ax
+            }
+        } else /if (${arg.Length} && !${arg.Equal[NULL]} && ${Int[${arg}]} > 0) {
+            /declare handItemArg string local
+            /declare handScope string local GROUP
+            /declare pIdx int local
+            /for pIdx 2 to 9
+                /if (${Param${pIdx}.Length} && !${Param${pIdx}.Equal[NULL]}) {
+                    /if (${handItemArg.Length}) {
+                        /varset handItemArg ${handItemArg} ${Param${pIdx}}
+                    } else {
+                        /varset handItemArg ${Param${pIdx}}
+                    }
+                }
+            /next pIdx
+            /if (${handItemArg.Length} > 4 && ${handItemArg.Right[4].Upper.Equal[ ALL]}) {
+                /varset handItemArg ${handItemArg.Left[${Math.Calc[${handItemArg.Length}-4]}]}
+                /varset handScope ALL
+            } else /if (${handItemArg.Upper.Equal[ALL]}) {
+                /varset handItemArg
+                /varset handScope ALL
+            }
+            /call HandOutToGroup ${Int[${arg}]} "${handItemArg}" "${handScope}"
+        } else {
+            /echo ${tgTag} \arUsage: Pick up an item, then: /mac turbogive hand COUNT
+            /echo ${tgTag} \awOr: /mac turbogive hand COUNT Item Name Here
+            /echo ${tgTag} \awOr: /mac turbogive hand COUNT Item Name all (zone-wide)
+            /echo ${tgTag} \awOr: /mac turbogive hand tell CHARNAME COUNT ItemName [all]
+            /echo ${tgTag} \awExample: /mac turbogive hand 6
+            /echo ${tgTag} \awExample: /mac turbogive hand tell Drel 5 Diamond all
+        }
+        /return
+    }
+
+    | ---- BANK (pull items from bank to inventory) ----
+    /if (${modeUpper.Equal[BANK]}) {
+        /if (${arg.Length} && !${arg.Equal[NULL]}) {
+            /declare argUpper string local ${arg.Upper.Replace[ ,]}
+            /if (${argUpper.Equal[ALL]}) {
+                /call BankAllBots "ALL"
+            } else /if (${argUpper.Equal[SOLO]}) {
+                /call BankPullAll TRUE
+            } else /if (${argUpper.Equal[PULL]}) {
+                /call BankPullAll FALSE
+                /call SendDoneToOrchestrator
+            } else /if (${argUpper.Equal[TELL]}) {
+                /declare tellTarget string local ${Param2}
+                /if (${tellTarget.Length} && !${tellTarget.Equal[NULL]}) {
+                    /echo ${tgTag} \ap[BANK]\aw Telling \ag${tellTarget}\aw to pull their items from bank...
+                    /squelch /e3bct ${tellTarget} /mac turbogive bank solo
+                } else {
+                    /echo ${tgTag} \arUsage: /mac turbogive bank tell CHARNAME \aw(e.g. bank tell Drel)
+                }
+            } else {
+                /call BankPull "${arg}"
+            }
+        } else {
+            /call BankAllBots "GROUP"
+        }
+        /return
+    }
+
+    | ---- SOLO (only I deliver, no broadcast to bots) ----
+    /if (${modeUpper.Equal[SOLO]}) {
+        /if (${arg.Length} && !${arg.Equal[NULL]} && ${arg.Upper.Equal[ALL]}) {
+            /call DeliverAll
+        } else {
+            /call DeliverAll "GROUP"
+        }
+        /return
+    }
+
+    | ---- TELL ----
+    /if (${modeUpper.Equal[TELL]}) {
+        /if (${arg.Length} && !${arg.Equal[NULL]}) {
+            /echo ${tgTag} \ag[DISTRIBUTE]\aw Telling \ag${arg}\aw to give their items...
+            /squelch /e3bct ${arg} /mac turbogive
+        } else {
+            /echo ${tgTag} \arUsage: /mac turbogive tell CHARNAME
+        }
+        /return
+    }
+
+    | ---- GIVE ----
+    /if (${mode.Length} && !${mode.Equal[NULL]}) {
+        /if (${Defined[_batchMode]}) /varset _batchMode FALSE
+        /call GiveToTarget "${mode}"
+        /return
+    }
+
+    /call DeliverEveryone "GROUP"
+/return
+
+| =====================================================================
+| DELIVER ALL — scan inventory, discover recipients, give to each
+| =====================================================================
+Sub DeliverAll(string scopeParam)
+    /declare deliverScope string local ${scopeParam.Upper.Replace[ ,]}
+    /declare groupOnly bool local FALSE
+    /if (${deliverScope.Equal[GROUP]}) /varset groupOnly TRUE
+
+    /echo ${tgTag} \ag[DELIVER ALL]\aw Scanning inventory for items to distribute${If[${groupOnly}, (group only),]}...
+
+    | Check feign death
+    /if (${Me.Feigning}) {
+        /echo ${tgTag} \arCannot trade while feigned. Stand up first.
+        /return
+    }
+
+    | Pause E3 and follow for the duration of delivery
+    /declare wasFollowingDA bool local FALSE
+    /if (${AdvPath.Following}) {
+        /varset wasFollowingDA TRUE
+        /squelch /afollow pause
+    }
+
+    /declare recipients string local |
+    /declare recipientCount int local 0
+
+    /declare keyIdx int local
+    /declare keyName string local
+    /declare keyVal string local
+    /for keyIdx 1 to 200
+        /varset keyName ${Ini[${iniFile},GiveList].Arg[${keyIdx},|]}
+        /if (!${keyName.Length} || ${keyName.Equal[NULL]}) /break
+        /if (${keyName.Left[1].Equal[_]}) /continue
+        /varset keyVal ${Ini[${iniFile},GiveList,${keyName}]}
+        /if (!${keyVal.Length} || ${keyVal.Equal[NULL]}) /continue
+        /if (${keyVal.Find[*]} || ${keyVal.Find[:]} || ${keyVal.Find[|]}) /continue
+        /if (!${recipients.Find[|${keyVal}|]}) {
+            /varset recipients ${recipients}${keyVal}|
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Discovered recipient from INI: ${keyVal}"
+        }
+    /next keyIdx
+
+    /declare pIdx int local
+    /declare pVal string local
+    /declare pColonPos int local 0
+    /declare pChar string local
+
+    /for pIdx 1 to 30
+        /varset pVal ${Ini[${iniFile},GiveList,_prefix${pIdx}]}
+        /if (!${pVal.Length} || ${pVal.Equal[NULL]}) /continue
+        /varset pColonPos ${pVal.Find[:]}
+        /if (!${pColonPos}) /continue
+        /varset pChar ${pVal.Left[${Math.Calc[${pColonPos}-1]}]}
+
+        /if (${pChar.Length} && !${recipients.Find[|${pChar}|]}) {
+            /varset recipients ${recipients}${pChar}|
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Discovered recipient from _prefix${pIdx}: ${pChar}"
+        }
+    /next pIdx
+
+    /declare wildcardsRaw string local ${Ini[${iniFile},GiveList,_wildcards]}
+    /if (${wildcardsRaw.Length} && !${wildcardsRaw.Equal[NULL]}) {
+        /declare wRemaining string local ${wildcardsRaw}
+        /declare wPipePos int local 0
+        /declare wChar string local
+
+:nextWildcardRecipient
+        /if (!${wRemaining.Length}) /goto :doneWildcardRecipients
+
+        /varset wPipePos ${wRemaining.Find[|]}
+        /if (${wPipePos}) {
+            /varset wChar ${wRemaining.Left[${Math.Calc[${wPipePos}-1]}]}
+            /varset wRemaining ${wRemaining.Mid[${Math.Calc[${wPipePos}+1]},2048]}
+        } else {
+            /varset wChar ${wRemaining}
+            /varset wRemaining
+        }
+
+        /if (${wChar.Length} && !${recipients.Find[|${wChar}|]}) {
+            /varset recipients ${recipients}${wChar}|
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Discovered recipient from _wildcards: ${wChar}"
+        }
+        /goto :nextWildcardRecipient
+:doneWildcardRecipients
+    }
+
+    /if (${recipients.Equal[|]}) {
+        /echo ${tgTag} \awNo recipients found in [GiveList]. Nothing to deliver.
+        /echo ${tgTag} \awUse \ag/mac turbogive add CHARNAME\aw (with item on cursor) or \ag/mac turbogive help\aw.
+        /if (${wasFollowingDA}) /squelch /afollow unpause
+        /return
+    }
+
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] All discovered recipients: ${recipients}"
+
+    /declare remaining string local ${recipients}
+    /declare pipePos int local
+    /declare recipName string local
+    /declare recipList string local
+    /declare skippedList string local
+    /declare isInGroup bool local FALSE
+    /declare gIdx int local
+
+    /varset remaining ${recipients.Right[-1]}
+    /if (${remaining.Left[1].Equal[|]}) /varset remaining ${remaining.Right[-1]}
+
+:countRecipients
+    /if (!${remaining.Length}) /goto :doneCountRecipients
+
+    /varset pipePos ${remaining.Find[|]}
+    /if (${pipePos}) {
+        /varset recipName ${remaining.Left[${Math.Calc[${pipePos}-1]}]}
+        /varset remaining ${remaining.Mid[${Math.Calc[${pipePos}+1]},2048]}
+    } else {
+        /varset recipName ${remaining}
+        /varset remaining
+    }
+
+    /if (!${recipName.Length}) /goto :countRecipients
+
+    /if (${SpawnCount[pc ${recipName}]} || ${Spawn[${recipName}].ID}) {
+        | If group-only mode, check group membership
+        /if (${groupOnly}) {
+            /varset isInGroup FALSE
+            /for gIdx 1 to ${Group.Members}
+                /if (${Group.Member[${gIdx}].Name.Equal[${recipName}]}) {
+                    /varset isInGroup TRUE
+                    /break
+                }
+            /next gIdx
+            /if (!${isInGroup}) {
+                /goto :countRecipients
+            }
+        }
+        /varcalc recipientCount ${recipientCount}+1
+        /if (${recipList.Length}) {
+            /varset recipList ${recipList}, \ag${recipName}\aw
+        } else {
+            /varset recipList \ag${recipName}\aw
+        }
+    } else {
+        /if (${skippedList.Length}) {
+            /varset skippedList ${skippedList}, \ay${recipName}\aw
+        } else {
+            /varset skippedList \ay${recipName}\aw
+        }
+    }
+    /goto :countRecipients
+
+:doneCountRecipients
+    /if (${recipientCount} == 0) {
+        /echo ${tgTag} \awNo recipients in zone. Check group/raid or run \ag/mac turbogive status\aw to see who's expected.
+        /if (${skippedList.Length}) /echo ${tgTag} \awNot in zone: ${skippedList}
+        /if (${wasFollowingDA}) /squelch /afollow unpause
+        /return
+    }
+
+    /echo ${tgTag} \awDelivering to \ag${recipientCount}\aw recipient(s): ${recipList}
+    /if (${logToFile}) /call LogInfo "DeliverAll: ${recipientCount} recipient(s): ${recipList}"
+    /if (${skippedList.Length}) /echo ${tgTag} \awSkipping (not in zone): ${skippedList}
+
+    /varset remaining ${recipients.Right[-1]}
+    /if (${remaining.Left[1].Equal[|]}) /varset remaining ${remaining.Right[-1]}
+    /declare deliverIdx int local 0
+
+:deliverNextRecipient
+    /if (!${remaining.Length}) /goto :doneDeliverAll
+
+    /varset pipePos ${remaining.Find[|]}
+    /if (${pipePos}) {
+        /varset recipName ${remaining.Left[${Math.Calc[${pipePos}-1]}]}
+        /varset remaining ${remaining.Mid[${Math.Calc[${pipePos}+1]},2048]}
+    } else {
+        /varset recipName ${remaining}
+        /varset remaining
+    }
+
+    /if (!${recipName.Length}) /goto :deliverNextRecipient
+
+    /if (!${SpawnCount[pc ${recipName}]} && !${Spawn[${recipName}].ID}) /goto :deliverNextRecipient
+    /if (${recipName.Equal[${Me.Name}]}) /goto :deliverNextRecipient
+
+    /if (${groupOnly}) {
+        /varset isInGroup FALSE
+        /for gIdx 1 to ${Group.Members}
+            /if (${Group.Member[${gIdx}].Name.Equal[${recipName}]}) {
+                /varset isInGroup TRUE
+                /break
+            }
+        /next gIdx
+        /if (!${isInGroup}) /goto :deliverNextRecipient
+    }
+
+    /varcalc deliverIdx ${deliverIdx}+1
+    /echo ${tgTag} \au---- Delivering to \ag${recipName}\au (${deliverIdx}/${recipientCount}) ----
+    /if (!${Defined[_batchMode]}) {
+        /declare _batchMode bool outer TRUE
+    } else {
+        /varset _batchMode TRUE
+    }
+    /call GiveToTarget "${recipName}"
+    /delay 3
+
+    /goto :deliverNextRecipient
+
+:doneDeliverAll
+    /if (${Defined[_batchMode]}) /varset _batchMode FALSE
+    /echo ${tgTag} \ag${Me.Name}\aw deliveries complete.
+    /if (${wasFollowingDA}) /squelch /afollow unpause
+/return
+
+| =====================================================================
+| DELIVER EVERYONE — deliver my items, then broadcast to all bots to deliver theirs
+| Scope GROUP: e3bcgz (group in zone); Scope ALL: e3bc (all e3 bots)
+| Parallel broadcast: all bots run at once, wait for all DONE (like bank)
+| =====================================================================
+Sub DeliverEveryone(string scopeParam)
+    /declare scope string local ${scopeParam.Upper.Replace[ ,]}
+    /declare isAllMode bool local FALSE
+    /if (${scope.Equal[ALL]}) /varset isAllMode TRUE
+
+    /if (${isAllMode}) {
+        /echo ${tgTag} \ag[ALL]\aw Starting full distribution (all bots in zone)...
+    } else {
+        /echo ${tgTag} \ag[GROUP]\aw Starting group distribution...
+    }
+
+    | Check feign death
+    /if (${Me.Feigning}) {
+        /echo ${tgTag} \arCannot trade while feigned. Stand up first.
+        /return
+    }
+
+    /echo ${tgTag} \au---- Step 1: Delivering my own items ----
+    /if (${isAllMode}) {
+        /call DeliverAll
+    } else {
+        /call DeliverAll "GROUP"
+    }
+
+    /echo ${tgTag} \au---- Step 2: Telling bots to deliver their items ----
+
+    /declare myName string local ${Me.Name}
+    /declare expectedDone int local 0
+
+    /if (${isAllMode}) {
+        /declare clientList string local ${MQ2Mono.Query[e3,E3Bots.ConnectedClients]}
+        /if (!${clientList.Length} || ${clientList.Equal[NULL]}) {
+            /echo ${tgTag} \ayNo connected E3 bots found. Skipping Step 2.
+            /goto :doneDeliverEveryone
+        }
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Connected e3 bots: ${clientList}"
+        /declare clientRemaining string local ${clientList}
+        /declare commaPos int local 0
+        /declare botName string local
+        /while (${clientRemaining.Length}) {
+            /varset commaPos ${clientRemaining.Find[,]}
+            /if (${commaPos}) {
+                /varset botName ${clientRemaining.Left[${Math.Calc[${commaPos}-1]}]}
+                /varset clientRemaining ${clientRemaining.Mid[${Math.Calc[${commaPos}+1]},2048]}
+            } else {
+                /varset botName ${clientRemaining}
+                /varset clientRemaining
+            }
+            /if (!${botName.Length}) /continue
+            /if (${botName.Equal[${myName}]}) /continue
+            /if (${Spawn[pc ${botName}].ID} || ${Spawn[${botName}].ID}) /varcalc expectedDone ${expectedDone}+1
+        }
+    } else {
+        /if (!${Me.Grouped}) {
+            /echo ${tgTag} \ayNot in a group. Use "turbogive all" for all e3 bots.
+            /goto :doneDeliverEveryone
+        }
+        /declare memberIdx int local
+        /declare memberName string local
+        /for memberIdx 1 to ${Group.Members}
+            /varset memberName ${Group.Member[${memberIdx}].Name}
+            /if (!${memberName.Length} || ${memberName.Equal[NULL]}) /continue
+            /if (${memberName.Equal[${myName}]}) /continue
+            /if (${Spawn[pc ${memberName}].ID} || ${Spawn[${memberName}].ID}) /varcalc expectedDone ${expectedDone}+1
+        /next memberIdx
+    }
+
+    /if (${expectedDone} == 0) {
+        /echo ${tgTag} \awNo bots in zone to tell.
+        /goto :doneDeliverEveryone
+    }
+
+    /if (!${Defined[_bankBroadcastMode]}) {
+        /declare _bankBroadcastMode bool outer FALSE
+    }
+    /if (!${Defined[_bankExpectedDone]}) {
+        /declare _bankExpectedDone int outer 0
+    }
+    /if (!${Defined[_bankReceivedFrom]}) {
+        /declare _bankReceivedFrom string outer
+    }
+    /if (!${Defined[_bankReceivedCount]}) {
+        /declare _bankReceivedCount int outer 0
+    }
+    /if (!${Defined[charDone]}) {
+        /declare charDone bool outer FALSE
+    }
+    /varset _bankBroadcastMode TRUE
+    /varset _bankExpectedDone ${expectedDone}
+    /varset _bankReceivedFrom |
+    /varset _bankReceivedCount 0
+    /varset charDone FALSE
+
+    /if (${isAllMode}) {
+        /squelch /e3bc /mac turbogive zone
+    } else {
+        /squelch /e3bcgz /mac turbogive group
+    }
+
+    /declare waitTicks int local 0
+    /declare maxWait int local 600
+    /while (!${charDone} && ${waitTicks} < ${maxWait}) {
+        /doevents
+        /delay 1
+        /varcalc waitTicks ${waitTicks}+1
+        /if (${Window[TradeWnd].Open}) {
+            /notify TradeWnd TRDW_Trade_Button leftmouseup
+            /delay 10 !${Window[TradeWnd].Open}
+        }
+        /if (${waitTicks} > 0 && ${Math.Calc[${waitTicks}%100]} == 0 && ${_bankReceivedCount} < ${_bankExpectedDone}) {
+            /echo ${tgTag} \awWaiting... \ag${_bankReceivedCount}\aw/\ag${_bankExpectedDone}\aw bot(s) done.
+        }
+    }
+
+    /varset _bankBroadcastMode FALSE
+
+    /if (!${charDone}) {
+        /echo ${tgTag} \ayTimed out (60s). \ag${_bankReceivedCount}\aw/\ag${_bankExpectedDone}\aw bot(s) finished.
+    } else {
+        /echo ${tgTag} \agAll \ag${_bankExpectedDone}\aw bot(s) deliveries complete.
+    }
+
+:doneDeliverEveryone
+    /declare finalMsg string local
+    /if (${expectedDone} > 0) {
+        /if (${isAllMode}) {
+            /varset finalMsg \at[turboGive]\ax \ag[ALL BOTS DELIVERED]\aw ${_bankReceivedCount}/${expectedDone} bot(s) finished.
+        } else {
+            /varset finalMsg \at[turboGive]\ax \ag[ALL BOTS DELIVERED]\aw ${_bankReceivedCount}/${expectedDone} group bot(s) finished.
+        }
+    } else {
+        /varset finalMsg \at[turboGive]\ax \ag[DELIVER COMPLETE]\aw (no bots to tell)
+    }
+    /doevents
+    /delay 5
+    /doevents
+    /echo ${finalMsg}
+/return
+
+| =====================================================================
+| HAND OUT TO GROUP
+| =====================================================================
+Sub HandOutToGroup(int countPerMember, string itemNameParam, string scopeParam)
+    /declare handItemName string local
+    /declare handAllMode bool local FALSE
+    /if (${scopeParam.Length} && ${scopeParam.Upper.Equal[ALL]}) /varset handAllMode TRUE
+
+    /if (${itemNameParam.Length} && !${itemNameParam.Equal[NULL]}) {
+        /varset handItemName ${itemNameParam}
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Hand item from param: ${handItemName}"
+        /if (!${FindItemCount[=${handItemName}]}) {
+            /echo ${tgTag} \arCould not find \at${handItemName}\ar in inventory.
+            /return
+        }
+        /if (${Cursor.ID}) {
+            /autoinventory
+            /delay 5 !${Cursor.ID}
+        }
+    } else {
+        | Use cursor item
+        /varset handItemName ${Cursor.Name}
+        /if (!${Cursor.ID} || !${handItemName.Length} || ${handItemName.Equal[NULL]}) {
+            /echo ${tgTag} \arNo item specified and nothing on cursor.
+            /echo ${tgTag} \awUsage: Pick up an item then /mac turbogive hand COUNT
+            /echo ${tgTag} \awOr: /mac turbogive hand COUNT Item Name Here
+            /return
+        }
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Hand item from cursor: ${handItemName}"
+        /autoinventory
+        /delay 5 !${Cursor.ID}
+    }
+
+    /if (!${handAllMode}) {
+        /if (!${Me.Grouped} || ${Group.Members} < 1) {
+            /echo ${tgTag} \arYou are not in a group.
+            /return
+        }
+    }
+
+    | Check feign death
+    /if (${Me.Feigning}) {
+        /echo ${tgTag} \arCannot trade while feigned. Stand up first.
+        /return
+    }
+
+    /declare recipList string local |
+    /declare recipCount int local 0
+    /declare memberIdx int local
+    /declare memberName string local
+
+    /if (${handAllMode}) {
+        /declare clientList string local ${MQ2Mono.Query[e3,E3Bots.ConnectedClients]}
+        /if (!${clientList.Length} || ${clientList.Equal[NULL]}) {
+            /echo ${tgTag} \arNo connected E3 bots found.
+            /return
+        }
+        /declare clientRemaining string local ${clientList}
+        /declare commaPos int local
+
+        /while (${clientRemaining.Length}) {
+            /varset commaPos ${clientRemaining.Find[,]}
+            /if (${commaPos}) {
+                /varset memberName ${clientRemaining.Left[${Math.Calc[${commaPos}-1]}]}
+                /varset clientRemaining ${clientRemaining.Mid[${Math.Calc[${commaPos}+1]},2048]}
+            } else {
+                /varset memberName ${clientRemaining}
+                /varset clientRemaining
+            }
+            /if (!${memberName.Length}) /continue
+            /if (${memberName.Equal[${Me.Name}]}) /continue
+            /if (!${Spawn[pc ${memberName}].ID} && !${Spawn[${memberName}].ID}) /continue
+            /varset recipList ${recipList}${memberName}|
+            /varcalc recipCount ${recipCount}+1
+        }
+    } else {
+        /for memberIdx 1 to ${Group.Members}
+            /varset memberName ${Group.Member[${memberIdx}].Name}
+            /if (!${memberName.Length} || ${memberName.Equal[NULL]}) /continue
+            /if (${memberName.Equal[${Me.Name}]}) /continue
+            /if (!${Spawn[pc ${memberName}].ID} && !${Spawn[${memberName}].ID}) /continue
+            /varset recipList ${recipList}${memberName}|
+            /varcalc recipCount ${recipCount}+1
+        /next memberIdx
+    }
+
+    /if (${recipCount} == 0) {
+        /echo ${tgTag} \arNo recipients found${If[${handAllMode}, in zone, in group]}.
+        /return
+    }
+
+    /declare totalHave int local ${FindItemCount[=${handItemName}]}
+    /declare totalNeed int local ${Math.Calc[${countPerMember} * ${recipCount}]}
+
+    /echo ${tgTag} \ag[HANDOUT]\aw Distributing \ag${countPerMember}\aw x \at${handItemName}\aw to \ag${recipCount}\aw ${If[${handAllMode},bot(s) in zone,group member(s)]}
+    /echo ${tgTag} \awNeed \ag${totalNeed}\aw total, have \ag${totalHave}\aw in inventory.
+
+    /if (${totalHave} < ${totalNeed}) {
+        /echo ${tgTag} \arWARNING: Not enough ${handItemName}! Need ${totalNeed} but only have ${totalHave}. Will give what I can.
+    }
+
+    /declare wasFollowingHO bool local FALSE
+    /if (${AdvPath.Following}) {
+        /varset wasFollowingHO TRUE
+        /squelch /afollow pause
+    }
+
+    /declare membersGiven int local 0
+    /declare packNum int local
+    /declare slotNum int local
+    /declare maxSlots int local
+    /declare foundSlot bool local FALSE
+    /declare foundPack int local 0
+    /declare foundInSlot int local 0
+    /declare remaining string local ${recipList.Right[-1]}
+    /if (${remaining.Left[1].Equal[|]}) /varset remaining ${remaining.Right[-1]}
+    /declare pipePos int local
+    /declare recipName string local
+
+:nextHandRecip
+    /if (!${remaining.Length}) /goto :doneHandout
+
+    /varset pipePos ${remaining.Find[|]}
+    /if (${pipePos}) {
+        /varset recipName ${remaining.Left[${Math.Calc[${pipePos}-1]}]}
+        /varset remaining ${remaining.Mid[${Math.Calc[${pipePos}+1]},2048]}
+    } else {
+        /varset recipName ${remaining}
+        /varset remaining
+    }
+
+    /if (!${recipName.Length}) /goto :nextHandRecip
+
+    /if (!${FindItemCount[=${handItemName}]}) {
+        /echo ${tgTag} \arOut of ${handItemName}. Stopping handout.
+        /goto :doneHandout
+    }
+
+    /target pc ${recipName}
+    /delay 5 ${Target.ID} && ${Target.CleanName.Equal[${recipName}]}
+    /if (!${Target.ID} || !${Target.CleanName.Equal[${recipName}]}) {
+        /target ${recipName}
+        /delay 5 ${Target.ID} && ${Target.CleanName.Equal[${recipName}]}
+    }
+    /if (!${Target.ID} || !${Target.CleanName.Equal[${recipName}]}) {
+        /echo ${tgTag} \arCould not target ${recipName} - skipping.
+        /goto :nextHandRecip
+    }
+
+    /if (${Target.Distance} > 15) {
+        /face fast
+        /if (${Navigation.PathExists[id ${Target.ID}]}) {
+            /nav id ${Target.ID} distance=10
+            /delay 150 !${Navigation.Active} || ${Target.Distance} <= 15
+            /if (${Navigation.Active}) /squelch /nav stop
+        } else {
+            /moveto id ${Target.ID} dist 10
+            /delay 100 ${Target.Distance} <= 15
+        }
+    }
+    /face fast
+
+    /if (${Target.Distance} > 30) {
+        /echo ${tgTag} \arCould not reach ${recipName} (${Target.Distance} ft) - skipping.
+        /goto :nextHandRecip
+    }
+
+    /varset foundSlot FALSE
+    /for packNum 1 to 10
+        /if (${foundSlot}) /break
+        /varset maxSlots ${Me.Inventory[pack${packNum}].Container}
+        /if (${maxSlots} == 0) /continue
+        /for slotNum 1 to ${maxSlots}
+            /if (!${Me.Inventory[pack${packNum}].Item[${slotNum}].ID}) /continue
+            /if (${Me.Inventory[pack${packNum}].Item[${slotNum}].Name.Equal[${handItemName}]}) {
+                /varset foundPack ${packNum}
+                /varset foundInSlot ${slotNum}
+                /varset foundSlot TRUE
+                /break
+            }
+        /next slotNum
+    /next packNum
+
+    /if (!${foundSlot}) {
+        /echo ${tgTag} \arCould not find ${handItemName} in bags - stopping.
+        /goto :doneHandout
+    }
+
+    /if (${Cursor.ID}) {
+        /autoinventory
+        /delay 5 !${Cursor.ID}
+    }
+
+    /nomodkey /itemnotify in pack${foundPack} ${foundInSlot} leftmouseup
+    /delay 10 ${Cursor.ID} || ${Window[QuantityWnd].Open}
+
+    /if (${Window[QuantityWnd].Open}) {
+        /notify QuantityWnd QTYW_slider newvalue ${countPerMember}
+        /delay 2
+        /notify QuantityWnd QTYW_Accept_Button leftmouseup
+        /delay 5 !${Window[QuantityWnd].Open}
+        /if (${Window[QuantityWnd].Open}) {
+            /notify QuantityWnd AcceptButton leftmouseup
+            /delay 5 !${Window[QuantityWnd].Open}
+        }
+        /if (${Window[QuantityWnd].Open}) {
+            /keypress ENTER
+            /delay 5 !${Window[QuantityWnd].Open}
+        }
+        /delay 3 ${Cursor.ID}
+    }
+
+    /if (!${Cursor.ID}) {
+        /echo ${tgTag} \arFailed to pick up ${handItemName} - skipping ${recipName}.
+        /goto :nextHandRecip
+    }
+
+    /squelch /e3bct ${recipName} /squelch /e3p on
+
+    /face fast
+    /delay 1
+    /notify TargetWindow Target_HP leftmouseup
+    /delay 10 !${Cursor.ID} || ${Window[TradeWnd].Open}
+    /if (${Cursor.ID} && !${Window[TradeWnd].Open}) {
+        /click left target
+        /delay 10 !${Cursor.ID} || ${Window[TradeWnd].Open}
+    }
+
+    /if (${Cursor.ID}) {
+        /echo ${tgTag} \ayCould not place ${handItemName} in trade window for ${recipName}. Returning to inventory.
+        /autoinventory
+        /delay 5 !${Cursor.ID}
+        /if (${Cursor.ID}) /call ForceClearCursor
+        /squelch /e3bct ${recipName} /squelch /e3p off
+        /goto :nextHandRecip
+    }
+
+    /call ExecuteTrade "${recipName}"
+    /varcalc membersGiven ${membersGiven}+1
+    /echo ${tgTag} \ag[HANDOUT]\aw Gave \ag${countPerMember}\aw x \at${handItemName}\aw to \ag${recipName}
+
+    /goto :nextHandRecip
+
+:doneHandout
+    /if (${Cursor.ID}) {
+        /autoinventory
+        /delay 5 !${Cursor.ID}
+        /if (${Cursor.ID}) /call ForceClearCursor
+    }
+
+    /echo ${tgTag} \ag[HANDOUT COMPLETE]\aw Gave \at${handItemName}\aw to \ag${membersGiven}\aw of \ag${recipCount}\aw ${If[${handAllMode},bot(s),group member(s)]}.
+    /call Announce "${announceMethod}" "${tgTag} \ag[HANDOUT COMPLETE]\aw Distributed ${handItemName} to ${membersGiven} ${If[${handAllMode},bot(s),group member(s)]}."
+    /if (${wasFollowingHO}) /squelch /afollow unpause
+/return
+
+| =====================================================================
+| BANK PULL
+| =====================================================================
+Sub BankPull(string targetName)
+    /declare charName string local ${targetName}
+
+    /if (${charName.Equal[${Me.Name}]}) {
+        | Called for self — valid when bank solo; BankPullAll(TRUE) includes self
+        /echo ${tgTag} \ag[BANK]\aw Pulling my items from bank...
+    } else {
+        /echo ${tgTag} \ag[BANK]\aw Pulling items from bank for \ag${charName}\aw...
+    }
+
+    /declare wasFollowingBP bool local FALSE
+    /if (${AdvPath.Following}) {
+        /varset wasFollowingBP TRUE
+        /squelch /afollow pause
+    }
+
+    /if (!${Window[BigBankWnd].Open}) {
+        /call FindAndOpenBank
+        /if (!${Window[BigBankWnd].Open}) {
+            /echo ${tgTag} \arCould not open bank window. Target a banker manually and try again.
+            /if (${wasFollowingBP}) /squelch /afollow unpause
+            /return
+        }
+    }
+
+    /if (!${Defined[prefixList]}) {
+        /declare prefixList string outer
+    } else {
+        /varset prefixList
+    }
+    /call LoadPrefixesForChar "${charName}"
+
+    /declare useWildcards bool local FALSE
+    /declare wildcardsRaw string local ${Ini[${iniFile},GiveList,_wildcards]}
+    /if (${wildcardsRaw.Length} && !${wildcardsRaw.Equal[NULL]}) {
+        /declare wcSearch string local |${wildcardsRaw.Upper}|
+        /if (${wcSearch.Find[|${charName.Upper}|]}) {
+            /varset useWildcards TRUE
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] WILDCARDS enabled for ${charName} (bank pull)"
+        }
+    }
+    /if (${useWildcards}) {
+        /call LoadWildcards
+    }
+
+    /declare itemsPulled int local 0
+    /declare bankNum int local
+    /declare slotNum int local
+    /declare maxSlots int local
+    /declare itemName string local
+    /declare itemNameUpper string local
+    /declare iniLookup string local
+    /declare iniLookupUpper string local
+    /declare matched bool local
+    /declare bankNoMatch string local |
+    /declare bankYesMatch string local |
+
+    /for bankNum 1 to 24
+        /if (!${Window[BigBankWnd].Open}) {
+            /echo ${tgTag} \arBank window closed during scan! Pulled \ag${itemsPulled}\aw item(s) before stopping.
+            /if (${wasFollowingBP}) /squelch /afollow unpause
+            /return
+        }
+
+        /if (!${Me.Bank[${bankNum}].ID}) /continue
+        /varset maxSlots ${Me.Bank[${bankNum}].Container}
+        /if (!${maxSlots}) {
+            /varset itemName ${Me.Bank[${bankNum}].Name}
+            /if (!${itemName.Length} || ${itemName.Equal[NULL]}) /continue
+
+            | Fast skip/match from cache
+            /if (${bankNoMatch.Find[|${itemName}|]}) /continue
+            /varset matched FALSE
+            /if (${bankYesMatch.Find[|${itemName}|]}) {
+                /varset matched TRUE
+            } else {
+                /call CheckBankItemMatch "${charName}" "${itemName}" ${useWildcards}
+                /if (${Macro.Return.Equal[TRUE]}) {
+                    /varset matched TRUE
+                    /if (${bankYesMatch.Length} > 2000) /varset bankYesMatch |
+                    /varset bankYesMatch ${bankYesMatch}${itemName}|
+                } else {
+                    /if (${bankNoMatch.Length} > 2000) /varset bankNoMatch |
+                    /varset bankNoMatch ${bankNoMatch}${itemName}|
+                }
+            }
+            /if (${matched}) {
+                /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Bank pull: ${itemName} from bank slot ${bankNum}"
+                /nomodkey /itemnotify bank${bankNum} leftmouseup
+                /delay 10 ${Cursor.ID} || ${Window[QuantityWnd].Open}
+                /call HandleBankQuantityWindow
+                /if (${Cursor.ID}) {
+                    /autoinventory
+                    /delay 5 !${Cursor.ID}
+                    /if (!${Cursor.ID}) {
+                        /varcalc itemsPulled ${itemsPulled}+1
+                        /echo ${tgTag} \ap[BANK]\aw Pulled ${itemName} for \ag${charName}
+                    }
+                }
+            }
+            /continue
+        }
+
+        /doevents
+        /for slotNum 1 to ${maxSlots}
+            /if (!${Me.Bank[${bankNum}].Item[${slotNum}].ID}) /continue
+            /varset itemName ${Me.Bank[${bankNum}].Item[${slotNum}].Name}
+            /if (!${itemName.Length} || ${itemName.Equal[NULL]}) /continue
+
+            | Fast skip/match from cache
+            /if (${bankNoMatch.Find[|${itemName}|]}) /continue
+            /varset matched FALSE
+            /if (${bankYesMatch.Find[|${itemName}|]}) {
+                /varset matched TRUE
+            } else {
+                /call CheckBankItemMatch "${charName}" "${itemName}" ${useWildcards}
+                /if (${Macro.Return.Equal[TRUE]}) {
+                    /varset matched TRUE
+                    /if (${bankYesMatch.Length} > 2000) /varset bankYesMatch |
+                    /varset bankYesMatch ${bankYesMatch}${itemName}|
+                } else {
+                    /if (${bankNoMatch.Length} > 2000) /varset bankNoMatch |
+                    /varset bankNoMatch ${bankNoMatch}${itemName}|
+                }
+            }
+
+            /if (!${matched}) /continue
+
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Bank pull: ${itemName} from bank${bankNum} slot ${slotNum}"
+            /nomodkey /itemnotify in bank${bankNum} ${slotNum} leftmouseup
+            /delay 10 ${Cursor.ID} || ${Window[QuantityWnd].Open}
+            /call HandleBankQuantityWindow
+            /if (${Cursor.ID}) {
+                /autoinventory
+                /delay 5 !${Cursor.ID}
+                /if (${Cursor.ID}) {
+                    /autoinventory
+                    /delay 5 !${Cursor.ID}
+                }
+                /if (!${Cursor.ID}) {
+                    /varcalc itemsPulled ${itemsPulled}+1
+                    /echo ${tgTag} \ap[BANK]\aw Pulled ${itemName} for \ag${charName}
+                } else {
+                    /call ForceClearCursor
+                    /if (${Cursor.ID}) {
+                        /echo ${tgTag} \arFailed to autoinventory ${itemName}. Cursor stuck.
+                        /if (${wasFollowingBP}) /squelch /afollow unpause
+                        /return
+                    }
+                }
+            }
+            /if (!${Me.FreeInventory}) {
+                /echo ${tgTag} \ayInventory full. Stopping bank pull.
+                /goto :bankPullDone
+            }
+        /next slotNum
+    /next bankNum
+
+:bankPullDone
+
+    /if (!${Me.FreeInventory}) {
+        /echo ${tgTag} \ayWarning: Inventory is full. Some items may not have been pulled.
+    }
+
+    /if (${itemsPulled} > 0) {
+        /echo ${tgTag} \ag[BANK COMPLETE]\aw Pulled \ag${itemsPulled}\aw item(s) from bank for \ag${charName}\aw.
+    } else {
+        /echo ${tgTag} \awNo matching items found in bank for \ag${charName}\aw.
+    }
+    /declare isBankBatch bool local FALSE
+    /if (${Defined[_bankBatchMode]} && ${_bankBatchMode}) /varset isBankBatch TRUE
+    /if (!${isBankBatch}) {
+        /if (${Window[BigBankWnd].Open}) {
+            /notify BigBankWnd DoneButton leftmouseup
+            /delay 5 !${Window[BigBankWnd].Open}
+        }
+    }
+    /if (${wasFollowingBP}) /squelch /afollow unpause
+/return
+
+| =====================================================================
+| BANK PULL ALL
+| =====================================================================
+Sub BankPullAll(bool includeSelf)
+    /declare pullForSelf bool local FALSE
+    /if (${includeSelf}) /varset pullForSelf TRUE
+
+    /echo ${tgTag} \ag[BANK ALL]\aw Scanning bank for all give-list items${If[${pullForSelf}, (including my items), (others only)]}...
+
+    /declare wasFollowingBA bool local FALSE
+    /if (${AdvPath.Following}) {
+        /varset wasFollowingBA TRUE
+        /squelch /afollow pause
+    }
+
+    /if (!${Window[BigBankWnd].Open}) {
+        /call FindAndOpenBank
+        /if (!${Window[BigBankWnd].Open}) {
+            /echo ${tgTag} \arCould not open bank window. Target a banker manually and try again.
+            /if (${wasFollowingBA}) /squelch /afollow unpause
+            /return
+        }
+    }
+
+    /declare recipients string local |
+    /declare keyIdx int local
+    /declare keyName string local
+    /declare keyVal string local
+    /for keyIdx 1 to 200
+        /varset keyName ${Ini[${iniFile},GiveList].Arg[${keyIdx},|]}
+        /if (!${keyName.Length} || ${keyName.Equal[NULL]}) /break
+        /if (${keyName.Left[1].Equal[_]}) /continue
+        /varset keyVal ${Ini[${iniFile},GiveList,${keyName}]}
+        /if (!${keyVal.Length} || ${keyVal.Equal[NULL]}) /continue
+        /if (${keyVal.Find[*]} || ${keyVal.Find[:]} || ${keyVal.Find[|]}) /continue
+        /if (!${recipients.Find[|${keyVal}|]}) {
+            /varset recipients ${recipients}${keyVal}|
+        }
+    /next keyIdx
+
+    /declare pIdx int local
+    /declare pVal string local
+    /declare pColonPos int local 0
+    /declare pChar string local
+
+    /for pIdx 1 to 30
+        /varset pVal ${Ini[${iniFile},GiveList,_prefix${pIdx}]}
+        /if (!${pVal.Length} || ${pVal.Equal[NULL]}) /continue
+        /varset pColonPos ${pVal.Find[:]}
+        /if (!${pColonPos}) /continue
+        /varset pChar ${pVal.Left[${Math.Calc[${pColonPos}-1]}]}
+        /if (${pChar.Length} && !${recipients.Find[|${pChar}|]}) /varset recipients ${recipients}${pChar}|
+    /next pIdx
+
+    /declare wildcardsRaw string local ${Ini[${iniFile},GiveList,_wildcards]}
+    /if (${wildcardsRaw.Length} && !${wildcardsRaw.Equal[NULL]}) {
+        /declare wRemaining string local ${wildcardsRaw}
+        /declare wPipePos int local 0
+        /declare wChar string local
+
+:nextWCRecipBank
+        /if (!${wRemaining.Length}) /goto :doneWCRecipBank
+        /varset wPipePos ${wRemaining.Find[|]}
+        /if (${wPipePos}) {
+            /varset wChar ${wRemaining.Left[${Math.Calc[${wPipePos}-1]}]}
+            /varset wRemaining ${wRemaining.Mid[${Math.Calc[${wPipePos}+1]},2048]}
+        } else {
+            /varset wChar ${wRemaining}
+            /varset wRemaining
+        }
+        /if (${wChar.Length} && !${recipients.Find[|${wChar}|]}) /varset recipients ${recipients}${wChar}|
+        /goto :nextWCRecipBank
+:doneWCRecipBank
+    }
+
+    /if (${recipients.Equal[|]}) {
+        /echo ${tgTag} \awNo give-list recipients found. Nothing to pull from bank.
+        /if (${wasFollowingBA}) /squelch /afollow unpause
+        /return
+    }
+
+    /if (!${Defined[_bankBatchMode]}) {
+        /declare _bankBatchMode bool outer TRUE
+    } else {
+        /varset _bankBatchMode TRUE
+    }
+
+    /declare remaining string local ${recipients.Right[-1]}
+    /if (${remaining.Left[1].Equal[|]}) /varset remaining ${remaining.Right[-1]}
+    /declare pipePos int local
+    /declare recipName string local
+
+:bankNextRecip
+    /if (!${remaining.Length}) /goto :doneBankAll
+
+    /varset pipePos ${remaining.Find[|]}
+    /if (${pipePos}) {
+        /varset recipName ${remaining.Left[${Math.Calc[${pipePos}-1]}]}
+        /varset remaining ${remaining.Mid[${Math.Calc[${pipePos}+1]},2048]}
+    } else {
+        /varset recipName ${remaining}
+        /varset remaining
+    }
+
+    /if (!${recipName.Length}) /goto :bankNextRecip
+
+    /if (!${pullForSelf} && ${recipName.Equal[${Me.Name}]}) /goto :bankNextRecip
+
+    /if (!${Window[BigBankWnd].Open}) {
+        /echo ${tgTag} \arBank window closed. Stopping.
+        /if (${wasFollowingBA}) /squelch /afollow unpause
+        /return
+    }
+
+    /echo ${tgTag} \au---- Pulling bank items for \ag${recipName}\au ----
+    /call BankPull "${recipName}"
+
+    /goto :bankNextRecip
+
+:doneBankAll
+    /if (${Defined[_bankBatchMode]}) /varset _bankBatchMode FALSE
+    /if (${Window[BigBankWnd].Open}) {
+        /notify BigBankWnd DoneButton leftmouseup
+        /delay 5 !${Window[BigBankWnd].Open}
+    }
+    /if (${wasFollowingBA}) /squelch /afollow unpause
+/return
+
+| =====================================================================
+| BANK ALL BOTS
+| =====================================================================
+Sub BankAllBots(string scopeParam)
+    /declare scope string local ${scopeParam.Upper.Replace[ ,]}
+    /declare isAllMode bool local FALSE
+    /if (${scope.Equal[ALL]}) /varset isAllMode TRUE
+    /declare myName string local ${Me.Name}
+
+    /if (${Me.Grouped} && !${Group.Leader.Name.Equal[${myName}]}) {
+        /echo ${tgTag} \ayNote: You are not group leader. Bots will signal the leader; you may not see completion.
+    }
+
+    | Compute expected DONE count (bots we'll broadcast to)
+    /declare expectedDone int local 0
+
+    /if (${isAllMode}) {
+        /declare clientList string local ${MQ2Mono.Query[e3,E3Bots.ConnectedClients]}
+        /if (!${clientList.Length} || ${clientList.Equal[NULL]}) {
+            /echo ${tgTag} \ayNo connected E3 bots found.
+            /return
+        }
+        /declare clientRemaining string local ${clientList}
+        /declare commaPos int local 0
+        /declare botName string local
+        /while (${clientRemaining.Length}) {
+            /varset commaPos ${clientRemaining.Find[,]}
+            /if (${commaPos}) {
+                /varset botName ${clientRemaining.Left[${Math.Calc[${commaPos}-1]}]}
+                /varset clientRemaining ${clientRemaining.Mid[${Math.Calc[${commaPos}+1]},2048]}
+            } else {
+                /varset botName ${clientRemaining}
+                /varset clientRemaining
+            }
+            /if (!${botName.Length}) /continue
+            /if (${botName.Equal[${myName}]}) /continue
+            /if (${Spawn[pc ${botName}].ID} || ${Spawn[${botName}].ID}) /varcalc expectedDone ${expectedDone}+1
+        }
+    } else {
+        /if (!${Me.Grouped}) {
+            /echo ${tgTag} \ayNot in a group. Use "bank all" for all e3 bots, "bank solo" to pull your own items, or "bank pull" to pull your bank for others.
+            /return
+        }
+        /declare memberIdx int local
+        /declare memberName string local
+        /for memberIdx 1 to ${Group.Members}
+            /varset memberName ${Group.Member[${memberIdx}].Name}
+            /if (!${memberName.Length} || ${memberName.Equal[NULL]}) /continue
+            /if (${memberName.Equal[${myName}]}) /continue
+            /if (${Spawn[pc ${memberName}].ID} || ${Spawn[${memberName}].ID}) /varcalc expectedDone ${expectedDone}+1
+        /next memberIdx
+    }
+
+    /if (${expectedDone} == 0) {
+        /echo ${tgTag} \awNo bots in zone to tell. Use "bank pull" to pull your own bank for others.
+        /return
+    }
+
+    /if (${isAllMode}) {
+        /echo ${tgTag} \ag[BANK ALL]\aw Telling all e3 bots in zone to pull from bank...
+        /if (${logToFile}) /call LogInfo "BANK ALL: Telling ${expectedDone} e3 bot(s) to pull from bank"
+    } else {
+        /echo ${tgTag} \ag[BANK GROUP]\aw Telling group members in zone to pull from bank...
+        /if (${logToFile}) /call LogInfo "BANK GROUP: Telling ${expectedDone} group member(s) to pull from bank"
+    }
+
+    /if (!${Defined[_bankBroadcastMode]}) {
+        /declare _bankBroadcastMode bool outer FALSE
+    }
+    /if (!${Defined[_bankExpectedDone]}) {
+        /declare _bankExpectedDone int outer 0
+    }
+    /if (!${Defined[_bankReceivedFrom]}) {
+        /declare _bankReceivedFrom string outer
+    }
+    /if (!${Defined[_bankReceivedCount]}) {
+        /declare _bankReceivedCount int outer 0
+    }
+    /if (!${Defined[charDone]}) {
+        /declare charDone bool outer FALSE
+    }
+    /varset _bankBroadcastMode TRUE
+    /varset _bankExpectedDone ${expectedDone}
+    /varset _bankReceivedFrom |
+    /varset _bankReceivedCount 0
+    /varset charDone FALSE
+
+    /if (${isAllMode}) {
+        /squelch /e3bc /mac turbogive bank pull
+    } else {
+        /squelch /e3bcgz /mac turbogive bank pull
+    }
+
+    /declare waitTicks int local 0
+    /declare maxWait int local 600
+    /while (!${charDone} && ${waitTicks} < ${maxWait}) {
+        /doevents
+        /delay 1
+        /varcalc waitTicks ${waitTicks}+1
+        /if (${waitTicks} > 0 && ${Math.Calc[${waitTicks}%100]} == 0 && ${_bankReceivedCount} < ${_bankExpectedDone}) {
+            /echo ${tgTag} \awWaiting... \ag${_bankReceivedCount}\aw/\ag${_bankExpectedDone}\aw bot(s) done.
+        }
+    }
+
+    /varset _bankBroadcastMode FALSE
+
+    /if (!${charDone}) {
+        /echo ${tgTag} \ayTimed out (60s). \ag${_bankReceivedCount}\aw/\ag${_bankExpectedDone}\aw bot(s) finished. Some may still be pulling.
+        /if (${logToFile}) /call LogWarn "Bank broadcast timed out: ${_bankReceivedCount}/${_bankExpectedDone} bot(s) done"
+    } else {
+        /echo ${tgTag} \ag[BANK COMPLETE]\aw All \ag${_bankExpectedDone}\aw bot(s) finished pulling from bank.
+        /if (${logToFile}) /call LogInfo "Bank broadcast complete: all ${_bankExpectedDone} bot(s) finished"
+    }
+    /doevents
+    /delay 5
+    /doevents
+/return
+
+| =====================================================================
+| FIND AND OPEN BANK
+| =====================================================================
+Sub FindAndOpenBank
+    /echo ${tgTag} \ayBank window not open - looking for a banker...
+
+    /declare dropLevSetting string local ${Ini[${iniFile},Settings,dropLevBeforeNav]}
+    /if (${dropLevSetting.Length} && !${dropLevSetting.Equal[NULL]}) {
+        /declare dropUpper string local ${dropLevSetting.Upper.Replace[ ,]}
+        /if ((${dropUpper.Equal[ON]} || ${dropUpper.Equal[TRUE]} || ${dropUpper.Equal[YES]} || ${dropUpper.Equal[1]}) && ${Me.Levitating}) {
+            /removelev
+            /delay 10 !${Me.Levitating}
+        }
+    }
+
+    /target clear
+    /delay 1
+
+    /if (${Target.ID} && ${Target.ID} != ${Me.ID} && ${Target.Type.NotEqual[PC]} && (${Target.Type.Equal[Banker]} || ${Target.Type.Equal[NPC]})) {
+        /if (${Target.Distance} <= 10) {
+            /click right target
+            /delay 100 ${Window[BigBankWnd].Open}
+            /doevents
+            /if (${Window[BigBankWnd].Open}) {
+                /echo ${tgTag} \agBank window opened.
+                /return
+            }
+        }
+    }
+
+    /if (!${Target.ID} || ${Target.ID} == ${Me.ID} || ${Target.Type.Equal[PC]} || (${Target.Type.NotEqual[Banker]} && ${Target.Type.NotEqual[NPC]})) {
+        /target npc banker
+        /delay 1
+    }
+    /if (!${Target.ID} || ${Target.ID} == ${Me.ID} || ${Target.Type.Equal[PC]} || (${Target.Type.NotEqual[Banker]} && ${Target.Type.NotEqual[NPC]})) {
+        /if (${SpawnCount[npc banker radius 200]} > 0) {
+            /target npc banker radius 200
+            /delay 1
+        }
+    }
+
+    /if (!${Target.ID} || ${Target.ID} == ${Me.ID} || ${Target.Type.Equal[PC]} || (${Target.Type.NotEqual[Banker]} && ${Target.Type.NotEqual[NPC]})) {
+        /echo ${tgTag} \arNo banker found nearby.
+        /return
+    }
+
+    /echo ${tgTag} \ayFound banker: \aw${Target.CleanName} \ay(distance: \aw${Target.Distance}\ay)
+
+    /if (${Target.Distance} > 10) {
+        /declare bankerID int local ${Target.ID}
+        /echo ${tgTag} \ayNavigating to banker (distance: \aw${Target.Distance}\ay)...
+        /call NavToIDWithDoorsAndNudges ${bankerID} 10 900
+
+        /if (!${Target.ID} || ${Target.ID} != ${bankerID}) {
+            /echo ${tgTag} \arLost banker target during navigation.
+            /return
+        }
+
+        /if (${Target.Distance} <= 10) {
+            /echo ${tgTag} \agReached banker (distance: \aw${Target.Distance}\ag)
+        } else {
+            /echo ${tgTag} \ayWARNING: Could not fully reach banker (distance: \aw${Target.Distance}\ay) - trying to open anyway
+        }
+    }
+
+    /face fast
+    /delay 1
+    /click right target
+    /delay 100 ${Window[BigBankWnd].Open}
+    /doevents
+
+    /if (${Window[BigBankWnd].Open}) {
+        /echo ${tgTag} \agBank window opened.
+    } else {
+        /echo ${tgTag} \arFailed to open bank window. Try targeting the banker manually.
+    }
+/return
+
+| =====================================================================
+| CHECK BANK ITEM MATCH
+| =====================================================================
+Sub CheckBankItemMatch(string charName, string itemName, bool useWildcards)
+    /declare iniLookup string local ${Ini[${iniFile},GiveList,${itemName}]}
+    /if (!${iniLookup.Length} || ${iniLookup.Equal[NULL]}) {
+        /varset iniLookup ${Ini[${iniFile},GiveList,${itemName.Upper}]}
+    }
+    /if (!${iniLookup.Length} || ${iniLookup.Equal[NULL]}) {
+        /varset iniLookup ${Ini[${iniFile},GiveList,${itemName.Lower}]}
+    }
+    /if (${iniLookup.Length} && !${iniLookup.Equal[NULL]}) {
+        /if (${iniLookup.Upper.Equal[${charName.Upper}]}) /return TRUE
+    }
+
+    /if (${prefixList.Length}) {
+        /call IsGivePrefix "${itemName}"
+        /if (${Macro.Return.Equal[TRUE]}) /return TRUE
+    }
+
+    /if (${useWildcards} && ${Defined[wildcardPrefixes]} && ${wildcardPrefixes.Length}) {
+        /call IsWildcardItem "${itemName}"
+        /if (${Macro.Return.Equal[TRUE]}) /return TRUE
+    }
+
+/return FALSE
+
+| =====================================================================
+| HANDLE BANK QUANTITY WINDOW
+| =====================================================================
+Sub HandleBankQuantityWindow
+    /if (!${Window[QuantityWnd].Open}) /return
+    /notify QuantityWnd QTYW_Accept_Button leftmouseup
+    /delay 5 !${Window[QuantityWnd].Open}
+    /if (${Window[QuantityWnd].Open}) {
+        /notify QuantityWnd AcceptButton leftmouseup
+        /delay 5 !${Window[QuantityWnd].Open}
+    }
+    /if (${Window[QuantityWnd].Open}) {
+        /keypress ENTER
+        /delay 5 !${Window[QuantityWnd].Open}
+    }
+    /delay 3 ${Cursor.ID}
+/return
+
+| =====================================================================
+| GIVE TO TARGET
+| =====================================================================
+Sub GiveToTarget(string targetName)
+    /declare charName string local ${targetName}
+
+    /echo ${tgTag} \awPreparing to give items to \ag${charName}\aw...
+
+    | Can't trade with yourself
+    /if (${charName.Equal[${Me.Name}]}) {
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Skipping ${charName} - that's me"
+        /return
+    }
+
+    | Verify the target character exists in zone (try pc first, fallback for illusions)
+    /if (!${SpawnCount[pc ${charName}]} && !${Spawn[${charName}].ID}) {
+        /echo ${tgTag} \ar${charName} is not in the current zone.
+        /return
+    }
+
+    | Check feign death
+    /if (${Me.Feigning}) {
+        /echo ${tgTag} \arCannot trade while feigned. Stand up first.
+        /return
+    }
+
+    | Load prefix rules for this character from _prefix1 through _prefix30
+    | Format: _prefix1=CharName:Spell:*  _prefix2=CharName:*Oleander
+    /if (!${Defined[prefixList]}) {
+        /declare prefixList string outer
+    } else {
+        /varset prefixList
+    }
+    /call LoadPrefixesForChar "${charName}"
+
+    | Load wildcard flag for this character from _wildcards key
+    | Format: _wildcards=CharName|OtherChar
+    /declare useWildcards bool local FALSE
+    /declare wildcardsRaw string local ${Ini[${iniFile},GiveList,_wildcards]}
+    /if (${wildcardsRaw.Length} && !${wildcardsRaw.Equal[NULL]}) {
+        /declare wcSearch string local |${wildcardsRaw.Upper}|
+        /if (${wcSearch.Find[|${charName.Upper}|]}) {
+            /varset useWildcards TRUE
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] WILDCARDS enabled for ${charName}"
+        }
+    }
+
+    | Load shared wildcards if needed
+    /if (${useWildcards}) {
+        /call LoadWildcards
+    }
+
+    /if (${showDebug} || ${logToFile}) {
+        /call LogDebug "[turboGive] Prefix patterns for ${charName}: ${prefixList}"
+        /call LogDebug "[turboGive] Use shared wildcards: ${useWildcards}"
+    }
+
+    | Skip own afollow management if called from DeliverAll (which handles it)
+    /declare isBatch bool local FALSE
+    /if (${Defined[_batchMode]} && ${_batchMode}) /varset isBatch TRUE
+
+    /declare wasFollowing bool local FALSE
+    /if (!${isBatch}) {
+        /if (${AdvPath.Following}) {
+            /varset wasFollowing TRUE
+            /squelch /afollow pause
+        }
+    }
+
+    | Tell target to stop moving
+    /squelch /e3bct ${charName} /squelch /afollow pause
+
+    | Target the character (try pc first, fallback to name for illusions)
+    /target pc ${charName}
+    /delay 5 ${Target.ID} && ${Target.CleanName.Equal[${charName}]}
+    /if (!${Target.ID} || !${Target.CleanName.Equal[${charName}]}) {
+        | Fallback: target by name without pc filter (handles illusions)
+        /target ${charName}
+        /delay 5 ${Target.ID} && ${Target.CleanName.Equal[${charName}]}
+    }
+    /if (!${Target.ID} || !${Target.CleanName.Equal[${charName}]}) {
+        /echo ${tgTag} \arCould not target ${charName}.
+        /if (${wasFollowing}) /squelch /afollow unpause
+        /squelch /e3bct ${charName} /squelch /afollow unpause
+        /return
+    }
+
+    | Navigate to target
+    /declare targetNavID int local ${Target.ID}
+    /if (${Target.Distance} > 15) {
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Navigating to ${charName} (distance: ${Target.Distance})"
+        /call NavToIDWithDoorsAndNudges ${targetNavID} 10 600
+    }
+    /face fast
+
+    /if (${Target.Distance} > 30) {
+        /echo ${tgTag} \arCould not get close enough to ${charName} (${Target.Distance} ft). Aborting.
+        /if (${wasFollowing}) /squelch /afollow unpause
+        /squelch /e3bct ${charName} /squelch /afollow unpause
+        /return
+    }
+
+    | Scan inventory — for each bag item, check all match rules
+    /declare itemsGiven int local 0
+    /declare itemsInBatch int local 0
+    /declare tradesCompleted int local 0
+    /declare packNum int local
+    /declare slotNum int local
+    /declare maxSlots int local
+    /declare itemName string local
+    /declare itemNameUpper string local
+    /declare iniLookup string local
+    /declare iniLookupUpper string local
+    /declare matched bool local
+    | Track items we've already checked and found NO match — skip on re-encounter
+    /declare noMatchCache string local |
+    | Track items we've already matched — skip INI/prefix checks, go straight to trade
+    /declare matchCache string local |
+
+    /echo ${tgTag} \awScanning inventory for items to give \ag${charName}\aw...
+
+    | Open all bag windows before scanning (itemnotify is more reliable when bag is open)
+    /declare openIdx int local
+    /for openIdx 1 to 10
+        /if (${Me.Inventory[pack${openIdx}].ID} && ${Me.Inventory[pack${openIdx}].Container} > 0) {
+            /if (!${Window[pack${openIdx}].Open}) {
+                /nomodkey /itemnotify pack${openIdx} rightmouseup
+                /delay 1 ${Window[pack${openIdx}].Open}
+            }
+        }
+    /next openIdx
+
+    /for packNum 1 to 10
+        /varset maxSlots ${Me.Inventory[pack${packNum}].Container}
+        /if (${maxSlots} == 0) /continue
+        /doevents
+        /for slotNum 1 to ${maxSlots}
+            /if (!${Me.Inventory[pack${packNum}].Item[${slotNum}].ID}) /continue
+            /varset itemName ${Me.Inventory[pack${packNum}].Item[${slotNum}].Name}
+            /if (!${itemName.Length} || ${itemName.Equal[NULL]}) /continue
+
+            | Fast skip: already checked this item name and it didn't match
+            /if (${noMatchCache.Find[|${itemName}|]}) /continue
+
+            | Fast path: already matched this item name before — skip checks, go to trade
+            /if (${matchCache.Find[|${itemName}|]}) /goto :doTrade
+
+            /varset matched FALSE
+            /varset itemNameUpper ${itemName.Upper}
+
+            | Check 1: Direct INI lookup — ItemName=CharName (single read, fallback only if needed)
+            /varset iniLookup ${Ini[${iniFile},GiveList,${itemName}]}
+            /if (!${iniLookup.Length} || ${iniLookup.Equal[NULL]}) {
+                /varset iniLookup ${Ini[${iniFile},GiveList,${itemNameUpper}]}
+            }
+            /if (${iniLookup.Length} && !${iniLookup.Equal[NULL]}) {
+                /varset iniLookupUpper ${iniLookup.Upper.Replace[ ,]}
+                /if (${iniLookupUpper.Equal[${charName.Upper}]}) {
+                    /varset matched TRUE
+                }
+            }
+
+            | Check 2: Give-list prefix/suffix/contains patterns
+            /if (!${matched} && ${prefixList.Length}) {
+                /call IsGivePrefix "${itemName}"
+                /if (${Macro.Return.Equal[TRUE]}) {
+                    /varset matched TRUE
+                }
+            }
+
+            | Check 3: Shared wildcards from [Wildcards] section
+            /if (!${matched} && ${useWildcards} && ${Defined[wildcardPrefixes]} && ${wildcardPrefixes.Length}) {
+                /call IsWildcardItem "${itemName}"
+                /if (${Macro.Return.Equal[TRUE]}) {
+                    /varset matched TRUE
+                }
+            }
+
+            | Cache the result for this item name
+            /if (!${matched}) {
+                /if (${noMatchCache.Length} > 2000) /varset noMatchCache |
+                /varset noMatchCache ${noMatchCache}${itemName}|
+                /continue
+            }
+
+            | Cache as matched for future stacks of the same item
+            /if (${matchCache.Length} > 2000) /varset matchCache |
+            /varset matchCache ${matchCache}${itemName}|
+
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Match: ${itemName} -> ${charName}"
+
+:doTrade
+            | ---- Found a match — pick it up and trade it ----
+
+            | Make sure target is still valid
+            /if (!${Target.ID} || !${Target.CleanName.Equal[${charName}]}) {
+                /target pc ${charName}
+                /delay 5 ${Target.ID} && ${Target.CleanName.Equal[${charName}]}
+                /if (!${Target.ID} || !${Target.CleanName.Equal[${charName}]}) {
+                    /target ${charName}
+                    /delay 5 ${Target.ID} && ${Target.CleanName.Equal[${charName}]}
+                }
+                /if (!${Target.ID}) {
+                    /echo ${tgTag} \arLost target ${charName} during trade. Aborting.
+                    /goto :abortGive
+                }
+            }
+
+            | Clear cursor if something is on it (TurboLoot IW_CharacterView method)
+            /if (${Cursor.ID}) {
+                /if (!${Window[InventoryWindow].Open}) /keypress i
+                /delay 5 ${Window[InventoryWindow].Open}
+                /if (${Window[InventoryWindow].Open}) {
+                    /notify InventoryWindow IW_CharacterView leftmouseup
+                    /delay 5 !${Cursor.ID}
+                }
+                /if (${Cursor.ID}) {
+                    /autoinventory
+                    /delay 5 !${Cursor.ID}
+                }
+                /if (${Cursor.ID}) /continue
+            }
+
+            | Pick up the item (shift modifier for trade operations)
+            /nomodkey /shift /itemnotify in pack${packNum} ${slotNum} leftmouseup
+            /delay 10 ${Cursor.ID} || ${Window[QuantityWnd].Open}
+
+            | Handle quantity window for stackable items (accept full stack)
+            /if (${Window[QuantityWnd].Open}) {
+                /notify QuantityWnd QTYW_Accept_Button leftmouseup
+                /delay 5 !${Window[QuantityWnd].Open}
+                /if (${Window[QuantityWnd].Open}) {
+                    /notify QuantityWnd AcceptButton leftmouseup
+                    /delay 5 !${Window[QuantityWnd].Open}
+                }
+                /if (${Window[QuantityWnd].Open}) {
+                    /keypress ENTER
+                    /delay 5 !${Window[QuantityWnd].Open}
+                }
+                /delay 3 ${Cursor.ID}
+            }
+
+            | Retry pickup if first attempt failed
+            /if (!${Cursor.ID}) {
+                /nomodkey /shift /itemnotify in pack${packNum} ${slotNum} leftmouseup
+                /delay 10 ${Cursor.ID}
+            }
+
+            /if (!${Cursor.ID}) {
+                /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Failed to pick up ${itemName} from pack${packNum} ${slotNum}"
+                /continue
+            }
+
+            | Verify we picked up the right item
+            /if (${Cursor.Name.NotEqual[${itemName}]}) {
+                /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Wrong item on cursor: expected ${itemName}, got ${Cursor.Name}"
+                /autoinventory
+                /delay 5 !${Cursor.ID}
+                /continue
+            }
+
+            | Place it in the trade window
+            | Primary: click target HP bar in target window (reliable with illusions)
+            | Secondary: /click left target (standard method)
+            /if (!${Window[TradeWnd].Open}) {
+                /face fast
+                /delay 1
+            }
+            /notify TargetWindow Target_HP leftmouseup
+            /delay 10 !${Cursor.ID} || ${Window[TradeWnd].Open}
+            /if (${Cursor.ID} && !${Window[TradeWnd].Open}) {
+                | Fallback: try /click left target
+                /click left target
+                /delay 10 !${Cursor.ID} || ${Window[TradeWnd].Open}
+            }
+
+            | If cursor still has item, trade window may not have opened
+            /if (${Cursor.ID}) {
+                /delay 5 !${Cursor.ID}
+                /if (${Cursor.ID}) {
+                    /echo ${tgTag} \ayCould not place ${itemName} in trade window. Returning to inventory and continuing.
+                    /autoinventory
+                    /delay 5 !${Cursor.ID}
+                    /if (${Cursor.ID}) {
+                        /call ForceClearCursor
+                        /if (${Cursor.ID}) {
+                            /echo ${tgTag} \arCursor stuck with ${itemName}. Aborting.
+                            /if (${logToFile}) /call LogError "Cursor stuck with ${itemName} during give to ${charName}"
+                            /goto :abortGive
+                        }
+                    }
+                    /continue
+                }
+            }
+
+            /varcalc itemsGiven ${itemsGiven}+1
+            /varcalc itemsInBatch ${itemsInBatch}+1
+
+            | Pause target's E3 when first item goes in (prevents premature auto-accept)
+            /if (${itemsInBatch} == 1) {
+                /squelch /e3bct ${charName} /squelch /e3p on
+            }
+
+            /echo ${tgTag} \ag[GIVE]\aw ${itemName} \atto ${charName} \aw(${itemsInBatch}/8 in batch)
+
+            | Trade window holds 8 items — execute trade when full
+            /if (${itemsInBatch} >= 8) {
+                /call ExecuteTrade "${charName}"
+                /varset itemsInBatch 0
+                /varcalc tradesCompleted ${tradesCompleted}+1
+            }
+        /next slotNum
+    /next packNum
+
+    | Execute final partial batch if any items are pending
+    /if (${itemsInBatch} > 0 && ${Window[TradeWnd].Open}) {
+        /call ExecuteTrade "${charName}"
+        /varcalc tradesCompleted ${tradesCompleted}+1
+    }
+
+    | Summary
+    /if (${itemsGiven} > 0) {
+        /echo ${tgTag} \agDone!\aw Gave \ag${itemsGiven}\aw item(s) to \ag${charName}\aw in \ag${tradesCompleted}\aw trade(s).
+    } else {
+        /if (!${isBatch}) {
+            /echo ${tgTag} \awNo matching items found for \ag${charName}\aw.
+        }
+    }
+
+    | Signal target that we're done (used by collect mode)
+    | Use e3bc broadcast (reliable) + e3bct (targeted) for redundancy
+    /squelch /e3bc /echo [turboGive] DONE ${Me.Name}->${charName}
+    /squelch /e3bct ${charName} /echo [turboGive] SIGNAL_DONE ${Me.Name}
+    /goto :cleanupGive
+
+:abortGive
+    /echo ${tgTag} \arGive aborted. Gave \ag${itemsGiven}\aw item(s) before stopping.
+    /if (${Window[TradeWnd].Open}) {
+        /notify TradeWnd TRDW_Cancel_Button leftmouseup
+        /delay 10 !${Window[TradeWnd].Open}
+    }
+    /squelch /e3bc /echo [turboGive] DONE ${Me.Name}->${charName}
+    /squelch /e3bct ${charName} /echo [turboGive] SIGNAL_DONE ${Me.Name}
+
+:cleanupGive
+    /if (${Cursor.ID}) {
+        /if (!${Window[InventoryWindow].Open}) /keypress i
+        /delay 5 ${Window[InventoryWindow].Open}
+        /if (${Window[InventoryWindow].Open}) {
+            /notify InventoryWindow IW_CharacterView leftmouseup
+            /delay 5 !${Cursor.ID}
+        }
+        /if (${Cursor.ID}) {
+            /autoinventory
+            /delay 5 !${Cursor.ID}
+        }
+    }
+    | Close bag windows
+    /call CloseBags
+    | Restore follow — only restore self if not in batch mode (DeliverAll handles it)
+    /if (!${isBatch}) {
+        /if (${wasFollowing}) /squelch /afollow unpause
+    }
+    | Always restore target's E3 and follow
+    /squelch /e3bct ${charName} /squelch /e3p off
+    /squelch /e3bct ${charName} /squelch /afollow unpause
+/return
+
+| =====================================================================
+| LOAD PREFIXES FOR CHARACTER
+| Reads _prefix1 through _prefix30 from [GiveList] and extracts
+| patterns belonging to the specified character.
+| Format: _prefix1=CharName:Spell:*   _prefix2=CharName:*Oleander
+| Populates prefixList with encoded entries:
+|   |P6:SPELL:||S8:OLEANDER||C10:DISTILLATE|
+|   P = prefix (starts with), S = suffix (ends with), C = contains
+| =====================================================================
+Sub LoadPrefixesForChar(string charName)
+    /declare idx int local
+    /declare entry string local
+    /declare colonPos int local 0
+    /declare entryChar string local
+    /declare entryPattern string local
+    /declare patternText string local
+    /declare patternLen int local
+    /declare patternType string local
+    /declare startsWithStar bool local FALSE
+    /declare endsWithStar bool local FALSE
+
+    /for idx 1 to 30
+        /varset entry ${Ini[${iniFile},GiveList,_prefix${idx}]}
+        /if (!${entry.Length} || ${entry.Equal[NULL]}) /continue
+
+        | Format is CharName:Pattern — find the FIRST colon to split
+        /varset colonPos ${entry.Find[:]}
+        /if (!${colonPos}) /continue
+
+        /varset entryChar ${entry.Left[${Math.Calc[${colonPos}-1]}]}
+        /varset entryPattern ${entry.Mid[${Math.Calc[${colonPos}+1]},500]}
+
+        | Check if this entry is for our target character (case-insensitive)
+        /if (!${entryChar.Upper.Equal[${charName.Upper}]}) /continue
+
+        /if (!${entryPattern.Length}) /continue
+
+        | Detect pattern type based on * position
+        /varset startsWithStar FALSE
+        /varset endsWithStar FALSE
+        /if (${entryPattern.Left[1].Equal[*]}) /varset startsWithStar TRUE
+        /if (${entryPattern.Right[1].Equal[*]}) /varset endsWithStar TRUE
+
+        /if (${startsWithStar} && ${endsWithStar}) {
+            | *text* = contains match
+            /varset patternType C
+            /varset patternText ${entryPattern.Left[-1]}
+            /varset patternText ${patternText.Right[-1]}
+        } else /if (${startsWithStar}) {
+            | *text = suffix match
+            /varset patternType S
+            /varset patternText ${entryPattern.Right[-1]}
+        } else /if (${endsWithStar}) {
+            | text* = prefix match
+            /varset patternType P
+            /varset patternText ${entryPattern.Left[-1]}
+        } else {
+            | No * at all — skip
+            /continue
+        }
+
+        /if (!${patternText.Length}) /continue
+
+        /varset patternLen ${patternText.Length}
+        /varset prefixList ${prefixList}|${patternType}${patternLen}:${patternText.Upper}
+        /if (${showDebug} || ${logToFile}) {
+            /if (${patternType.Equal[P]}) {
+                /call LogDebug "[turboGive] Pattern _prefix${idx} for ${charName}: STARTS WITH [${patternText}] (${patternLen} chars)"
+            } else /if (${patternType.Equal[S]}) {
+                /call LogDebug "[turboGive] Pattern _prefix${idx} for ${charName}: ENDS WITH [${patternText}] (${patternLen} chars)"
+            } else {
+                /call LogDebug "[turboGive] Pattern _prefix${idx} for ${charName}: CONTAINS [${patternText}] (${patternLen} chars)"
+            }
+        }
+    /next idx
+
+    /if (${prefixList.Length}) /varset prefixList ${prefixList}|
+/return
+
+| =====================================================================
+| EXECUTE TRADE (click trade, tell target to click, wait for completion)
+| =====================================================================
+Sub ExecuteTrade(string tradeName)
+    /if (!${Window[TradeWnd].Open}) {
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Trade window not open - nothing to execute"
+        /return
+    }
+
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Clicking Trade button..."
+
+    | We click Trade first
+    /notify TradeWnd TRDW_Trade_Button leftmouseup
+    /delay 1
+
+    | Tell the target to click Trade (with small delay so their window is ready)
+    /squelch /e3bct ${tradeName} /timed 2 /notify TradeWnd TRDW_Trade_Button leftmouseup
+
+    | Wait for trade window to close (means both sides clicked)
+    /declare tradeWait int local 0
+    /while (${Window[TradeWnd].Open} && ${tradeWait} < 100) {
+        /doevents
+        /delay 1
+        /varcalc tradeWait ${tradeWait}+1
+
+        | Retry click every 2 seconds in case it didn't register
+        /if (${Math.Calc[${tradeWait} % 20]} == 0) {
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Trade still pending, re-clicking..."
+            /notify TradeWnd TRDW_Trade_Button leftmouseup
+            /squelch /e3bct ${tradeName} /timed 2 /notify TradeWnd TRDW_Trade_Button leftmouseup
+        }
+    }
+
+    /if (${Window[TradeWnd].Open}) {
+        /echo ${tgTag} \arTrade timed out after 10 seconds. Cancelling.
+        /if (${logToFile}) /call LogError "Trade timed out after 10 seconds"
+        /notify TradeWnd TRDW_Cancel_Button leftmouseup
+        /delay 10 !${Window[TradeWnd].Open}
+        /if (${Cursor.ID}) /call ForceClearCursor
+    } else {
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Trade completed successfully"
+    }
+
+    | Unpause target's E3 now that trade is done
+    /squelch /e3bct ${tradeName} /squelch /e3p off
+
+    | Brief pause to let game state settle before next batch
+    /delay 1
+/return
+
+| =====================================================================
+| COLLECT FROM GROUP
+| =====================================================================
+Sub CollectFromGroup(string scopeArg)
+    /declare scope string local ${scopeArg.Upper.Replace[ ,]}
+    /if (!${Defined[charDone]}) {
+        /declare charDone bool outer FALSE
+    } else {
+        /varset charDone FALSE
+    }
+    /declare myName string local ${Me.Name}
+
+    /echo ${tgTag} \awCollecting items from ${If[${scope.Equal[ALL]} || ${scope.Equal[RAID]},all e3 bots,group members]}...
+
+    | Check feign death
+    /if (${Me.Feigning}) {
+        /echo ${tgTag} \arCannot trade while feigned.
+        /return
+    }
+
+    | Pause E3 logic and follow
+    /declare wasFollowing bool local FALSE
+    /if (${AdvPath.Following}) {
+        /varset wasFollowing TRUE
+        /squelch /afollow pause
+    }
+
+    /declare memberName string local
+    /declare memberIdx int local
+    /declare membersAsked int local 0
+
+    /if (!${scope.Length} || ${scope.Equal[NULL]} || ${scope.Equal[GROUP]}) {
+        | ---- Group mode ----
+        /for memberIdx 1 to ${Group.Members}
+            /varset memberName ${Group.Member[${memberIdx}].Name}
+            /if (!${memberName.Length} || ${memberName.Equal[NULL]}) /continue
+            /if (${memberName.Equal[${myName}]}) /continue
+            /if (!${Spawn[pc ${memberName}].ID}) {
+                /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Skipping ${memberName} - not in zone"
+                /continue
+            }
+
+            /call AskForItems "${memberName}"
+            /varcalc membersAsked ${membersAsked}+1
+        /next memberIdx
+
+    } else /if (${scope.Equal[ALL]} || ${scope.Equal[RAID]} || ${scope.Equal[E3BOTS]} || ${scope.Equal[BOTS]}) {
+        | ---- E3 bots mode ----
+        /declare clientList string local ${MQ2Mono.Query[e3,E3Bots.ConnectedClients]}
+        /if (!${clientList.Length} || ${clientList.Equal[NULL]}) {
+            /echo ${tgTag} \arNo connected E3 bots found.
+            /if (${wasFollowing}) /squelch /afollow unpause
+            /return
+        }
+
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Connected e3 bots: ${clientList}"
+
+        | Parse comma-delimited client list
+        /declare clientRemaining string local ${clientList}
+        /declare commaPos int local 0
+        /declare botName string local
+
+:nextBot
+        /if (!${clientRemaining.Length}) /goto :doneCollecting
+
+        /varset commaPos ${clientRemaining.Find[,]}
+        /if (${commaPos}) {
+            /varset botName ${clientRemaining.Left[${Math.Calc[${commaPos}-1]}]}
+            /varset clientRemaining ${clientRemaining.Mid[${Math.Calc[${commaPos}+1]},2048]}
+        } else {
+            /varset botName ${clientRemaining}
+            /varset clientRemaining
+        }
+
+        /if (!${botName.Length}) /goto :nextBot
+        /if (${botName.Equal[${myName}]}) /goto :nextBot
+        /if (!${Spawn[pc ${botName}].ID}) {
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Skipping ${botName} - not in zone"
+            /goto :nextBot
+        }
+
+        /call AskForItems "${botName}"
+        /varcalc membersAsked ${membersAsked}+1
+        /goto :nextBot
+    }
+
+:doneCollecting
+    /echo ${tgTag} \agCollection complete.\aw Asked \ag${membersAsked}\aw character(s).
+    /if (${wasFollowing}) /squelch /afollow unpause
+/return
+
+| =====================================================================
+| ASK FOR ITEMS (tell a character to run TurboGive to give us stuff)
+| =====================================================================
+Sub AskForItems(string senderName)
+    /echo ${tgTag} \awAsking \ag${senderName}\aw to send items...
+
+    /varset charDone FALSE
+
+    | Tell the sender to run TurboGive targeting us
+    /squelch /e3bct ${senderName} /mac turbogive ${Me.Name}
+
+    | Wait for them to finish (event handler sets charDone=TRUE on their /tell)
+    /declare waitTicks int local 0
+    /declare maxWait int local 600
+
+    /while (!${charDone} && ${waitTicks} < ${maxWait}) {
+        /doevents
+        /delay 1
+        /varcalc waitTicks ${waitTicks}+1
+
+        | If trade window opens, accept it
+        /if (${Window[TradeWnd].Open}) {
+            /notify TradeWnd TRDW_Trade_Button leftmouseup
+            /delay 10 !${Window[TradeWnd].Open}
+        }
+    }
+
+    /if (!${charDone}) {
+        /echo ${tgTag} \ayTimed out waiting for \ag${senderName}\ay (60s). Moving on.
+    } else {
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] ${senderName} finished sending items"
+    }
+/return
+
+| =====================================================================
+| ADD ITEM TO GIVE LIST
+| =====================================================================
+Sub AddItemToGiveList(string targetName)
+    /declare charName string local ${targetName}
+    /declare cursorItem string local ${Cursor.Name}
+
+    /if (!${Cursor.ID} || !${cursorItem.Length} || ${cursorItem.Equal[NULL]}) {
+        /echo ${tgTag} \arNo item on cursor. Pick up an item first.
+        /return
+    }
+
+    | Check if this item already has a give-list entry
+    /declare existing string local ${Ini[${iniFile},GiveList,${cursorItem}]}
+    /if (${existing.Length} && !${existing.Equal[NULL]}) {
+        /if (${existing.Upper.Equal[${charName.Upper}]}) {
+            /echo ${tgTag} \ay${cursorItem}\aw is already assigned to \ag${charName}\aw.
+        } else {
+            | Overwrite — item reassigned to new character
+            /ini "${iniFile}" "GiveList" "${cursorItem}" "${charName}"
+            /echo ${tgTag} \agUpdated\aw ${cursorItem}: \ay${existing}\aw -> \ag${charName}
+        }
+    } else {
+        | New entry
+        /ini "${iniFile}" "GiveList" "${cursorItem}" "${charName}"
+        /echo ${tgTag} \agAdded\aw ${cursorItem} = \ag${charName}\aw to [GiveList].
+    }
+
+    | Return item to inventory
+    /autoinventory
+    /delay 5 !${Cursor.ID}
+/return
+
+| =====================================================================
+| PRINT GIVE LIST
+| Shows prefix rules, wildcard status, and exact-match items in bags
+| for a character. Since we can't enumerate INI keys, exact items are
+| shown by scanning inventory and checking each item via INI lookup.
+| =====================================================================
+Sub PrintGiveList(string targetName)
+    /declare charName string local ${targetName}
+    /declare itemNum int local 0
+
+    /call Announce "${announceMethod}" "${tgTag} \ag${charName}\aw's give-list:"
+
+    | Show prefix/pattern rules for this character from _prefix1 through _prefix30
+    /declare pIdx int local
+    /declare pVal string local
+    /declare pColonPos int local 0
+    /declare pChar string local
+    /declare pPattern string local
+
+    /for pIdx 1 to 30
+        /varset pVal ${Ini[${iniFile},GiveList,_prefix${pIdx}]}
+        /if (!${pVal.Length} || ${pVal.Equal[NULL]}) /continue
+
+        /varset pColonPos ${pVal.Find[:]}
+        /if (!${pColonPos}) /continue
+        /varset pChar ${pVal.Left[${Math.Calc[${pColonPos}-1]}]}
+        /varset pPattern ${pVal.Mid[${Math.Calc[${pColonPos}+1]},500]}
+
+        /if (${pChar.Upper.Equal[${charName.Upper}]}) {
+            /varcalc itemNum ${itemNum}+1
+            | Detect pattern type for display
+            /if (${pPattern.Left[1].Equal[*]} && ${pPattern.Right[1].Equal[*]}) {
+                /call Announce "${announceMethod}" "${tgTag}   \aw${itemNum}. \ao[CONTAINS]\aw ${pPattern}"
+            } else /if (${pPattern.Left[1].Equal[*]}) {
+                /call Announce "${announceMethod}" "${tgTag}   \aw${itemNum}. \ao[ENDS WITH]\aw ${pPattern}"
+            } else /if (${pPattern.Right[1].Equal[*]}) {
+                /call Announce "${announceMethod}" "${tgTag}   \aw${itemNum}. \ao[STARTS WITH]\aw ${pPattern}"
+            } else {
+                /call Announce "${announceMethod}" "${tgTag}   \aw${itemNum}. \ao[PATTERN]\aw ${pPattern}"
+            }
+        }
+    /next pIdx
+
+    | Show wildcard status for this character
+    /declare wildcardsRaw string local ${Ini[${iniFile},GiveList,_wildcards]}
+    /if (${wildcardsRaw.Length} && !${wildcardsRaw.Equal[NULL]}) {
+        /declare wcSearch string local |${wildcardsRaw.Upper}|
+        /if (${wcSearch.Find[|${charName.Upper}|]}) {
+            /varcalc itemNum ${itemNum}+1
+            /call Announce "${announceMethod}" "${tgTag}   \aw${itemNum}. \ag[WILDCARDS]\aw - all shared [Wildcards] rules (Spell:, Song:, Tome, etc.)"
+        }
+    }
+
+    | Scan inventory for exact-match items assigned to this character
+    /declare packNum int local
+    /declare slotNum int local
+    /declare maxSlots int local
+    /declare itemName string local
+    /declare iniLookup string local
+    /declare shownItems string local |
+    /declare invCount int local 0
+
+    /for packNum 1 to 10
+        /varset maxSlots ${Me.Inventory[pack${packNum}].Container}
+        /if (${maxSlots} == 0) /continue
+        /for slotNum 1 to ${maxSlots}
+            /if (!${Me.Inventory[pack${packNum}].Item[${slotNum}].ID}) /continue
+            /varset itemName ${Me.Inventory[pack${packNum}].Item[${slotNum}].Name}
+            /if (!${itemName.Length} || ${itemName.Equal[NULL]}) /continue
+
+            | Skip items we've already listed (dedup for stacks across slots)
+            /if (${shownItems.Find[|${itemName}|]}) /continue
+
+            | Direct INI lookup
+            /varset iniLookup ${Ini[${iniFile},GiveList,${itemName}]}
+            /if (!${iniLookup.Length} || ${iniLookup.Equal[NULL]}) {
+                /varset iniLookup ${Ini[${iniFile},GiveList,${itemName.Upper}]}
+            }
+            /if (!${iniLookup.Length} || ${iniLookup.Equal[NULL]}) {
+                /varset iniLookup ${Ini[${iniFile},GiveList,${itemName.Lower}]}
+            }
+
+            /if (${iniLookup.Length} && !${iniLookup.Equal[NULL]} && ${iniLookup.Upper.Equal[${charName.Upper}]}) {
+                /varcalc itemNum ${itemNum}+1
+                /varset invCount ${FindItemCount[=${itemName}]}
+                /call Announce "${announceMethod}" "${tgTag}   \aw${itemNum}. \at${itemName} \aw(${invCount} in my bags)"
+                /varset shownItems ${shownItems}${itemName}|
+            }
+        /next slotNum
+    /next packNum
+
+    /if (${itemNum} == 0) {
+        /call Announce "${announceMethod}" "${tgTag}   \aw(no matching items or rules found)"
+    }
+/return
+
+| =====================================================================
+| PRINT STATUS — show configuration, recipients, and item counts
+| =====================================================================
+Sub PrintStatus
+    /echo ${tgTag} \au==== \agSTATUS \au====\ax
+
+    | INI file
+    /echo ${tgTag} \awINI: \ag${iniFile}\ax
+
+    | Count exact items
+    /declare keyIdx int local
+    /declare keyName string local
+    /declare keyVal string local
+    /declare exactCount int local 0
+    /declare recipients string local |
+
+    /for keyIdx 1 to 200
+        /varset keyName ${Ini[${iniFile},GiveList].Arg[${keyIdx},|]}
+        /if (!${keyName.Length} || ${keyName.Equal[NULL]}) /break
+        /if (${keyName.Left[1].Equal[_]}) /continue
+        /varcalc exactCount ${exactCount}+1
+        /varset keyVal ${Ini[${iniFile},GiveList,${keyName}]}
+        /if (!${keyVal.Length} || ${keyVal.Equal[NULL]}) /continue
+        /if (${keyVal.Find[*]} || ${keyVal.Find[:]} || ${keyVal.Find[|]}) /continue
+        /if (!${recipients.Find[|${keyVal}|]}) {
+            /varset recipients ${recipients}${keyVal}|
+        }
+    /next keyIdx
+
+    /echo ${tgTag} \awExact items: \ag${exactCount}\ax
+
+    | Count prefix patterns
+    /declare prefixCount int local 0
+    /declare pIdx int local
+    /declare pVal string local
+    /declare pColonPos int local
+    /declare pChar string local
+
+    /for pIdx 1 to 30
+        /varset pVal ${Ini[${iniFile},GiveList,_prefix${pIdx}]}
+        /if (!${pVal.Length} || ${pVal.Equal[NULL]}) /continue
+        /varcalc prefixCount ${prefixCount}+1
+        /varset pColonPos ${pVal.Find[:]}
+        /if (${pColonPos}) {
+            /varset pChar ${pVal.Left[${Math.Calc[${pColonPos}-1]}]}
+            /if (${pChar.Length} && !${recipients.Find[|${pChar}|]}) {
+                /varset recipients ${recipients}${pChar}|
+            }
+        }
+    /next pIdx
+
+    /echo ${tgTag} \awPrefix patterns: \ag${prefixCount}\ax
+
+    | Wildcards
+    /declare wildcardsRaw string local ${Ini[${iniFile},GiveList,_wildcards]}
+    /if (${wildcardsRaw.Length} && !${wildcardsRaw.Equal[NULL]}) {
+        /echo ${tgTag} \awWildcard recipients: \ag${wildcardsRaw}\ax
+
+        | Add wildcard chars to recipients
+        /declare wRemaining string local ${wildcardsRaw}
+        /declare wPipePos int local
+        /declare wChar string local
+        /while (${wRemaining.Length}) {
+            /varset wPipePos ${wRemaining.Find[|]}
+            /if (${wPipePos}) {
+                /varset wChar ${wRemaining.Left[${Math.Calc[${wPipePos}-1]}]}
+                /varset wRemaining ${wRemaining.Mid[${Math.Calc[${wPipePos}+1]},2048]}
+            } else {
+                /varset wChar ${wRemaining}
+                /varset wRemaining
+            }
+            /if (${wChar.Length} && !${recipients.Find[|${wChar}|]}) {
+                /varset recipients ${recipients}${wChar}|
+            }
+        }
+
+        | Count active wildcards from [Wildcards] section
+        /declare wcActive int local 0
+        /declare wcVal string local
+        /declare wcUpper string local
+        /varset wcVal ${Ini[${iniFile},Wildcards,Spell:]}
+        /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) { /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+            /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]}) /varcalc wcActive ${wcActive}+1
+        }
+        /varset wcVal ${Ini[${iniFile},Wildcards,Skill:]}
+        /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) { /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+            /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]}) /varcalc wcActive ${wcActive}+1
+        }
+        /varset wcVal ${Ini[${iniFile},Wildcards,Song:]}
+        /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) { /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+            /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]}) /varcalc wcActive ${wcActive}+1
+        }
+        /varset wcVal ${Ini[${iniFile},Wildcards,Tome ]}
+        /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) { /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+            /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]}) /varcalc wcActive ${wcActive}+1
+        }
+        /varset wcVal ${Ini[${iniFile},Wildcards,Tome of ]}
+        /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) { /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+            /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]}) /varcalc wcActive ${wcActive}+1
+        }
+        /echo ${tgTag} \awActive [Wildcards] rules: \ag${wcActive}\ax
+    } else {
+        /echo ${tgTag} \awWildcards: \ayNone\ax
+    }
+
+    | List all recipients and zone status
+    /echo ${tgTag} \au---- \agRECIPIENTS \au----\ax
+    /declare remaining string local ${recipients.Right[-1]}
+    /if (${remaining.Left[1].Equal[|]}) /varset remaining ${remaining.Right[-1]}
+    /declare pipePos int local
+    /declare recipName string local
+    /declare recipCount int local 0
+    /declare inZoneCount int local 0
+    /declare inGroupCount int local 0
+    /declare gIdx int local
+    /declare inZone bool local FALSE
+    /declare inGroup bool local FALSE
+
+    /while (${remaining.Length}) {
+        /varset pipePos ${remaining.Find[|]}
+        /if (${pipePos}) {
+            /varset recipName ${remaining.Left[${Math.Calc[${pipePos}-1]}]}
+            /varset remaining ${remaining.Mid[${Math.Calc[${pipePos}+1]},2048]}
+        } else {
+            /varset recipName ${remaining}
+            /varset remaining
+        }
+        /if (!${recipName.Length}) /continue
+        /varcalc recipCount ${recipCount}+1
+
+        /varset inZone FALSE
+        /varset inGroup FALSE
+        /if (${SpawnCount[pc ${recipName}]} || ${Spawn[${recipName}].ID}) /varset inZone TRUE
+        /if (${inZone}) /varcalc inZoneCount ${inZoneCount}+1
+        /for gIdx 1 to ${Group.Members}
+            /if (${Group.Member[${gIdx}].Name.Equal[${recipName}]}) {
+                /varset inGroup TRUE
+                /varcalc inGroupCount ${inGroupCount}+1
+                /break
+            }
+        /next gIdx
+
+        /if (${recipName.Equal[${Me.Name}]}) {
+            /echo ${tgTag}   \ag${recipName}\aw (me)
+        } else /if (${inGroup}) {
+            /echo ${tgTag}   \ag${recipName}\aw (in group, in zone)
+        } else /if (${inZone}) {
+            /echo ${tgTag}   \ay${recipName}\aw (in zone, not in group)
+        } else {
+            /echo ${tgTag}   \ar${recipName}\aw (not in zone)
+        }
+    }
+
+    /echo ${tgTag} \awTotal recipients: \ag${recipCount}\aw | In zone: \ag${inZoneCount}\aw | In group: \ag${inGroupCount}\ax
+    /echo ${tgTag} \au========================\ax
+/return
+
+| =====================================================================
+| PRINT HELP
+| =====================================================================
+Sub PrintHelp
+    | Colors: \at=dividers \ag=give \ao=collect \ap=bank \ay=setup \au=header
+    /echo \au<<< \ar--------------- \aoTurboGive Help \ar--------------- \au>>>\ax
+    /echo \aw \ax
+    /echo \at==== \ayGETTING STARTED \at====\ax
+    /echo \aw  1) Add items: target a PC, pick up item, \ag/mac turbogive add\ax \aw(or \agadd target\ax)\ax
+    /echo \aw  2) Distribute: \ag/mac turbogive\ax \aw(gives to group; each bot also gives theirs)\ax
+    /echo \aw \ax
+    /echo \at==== \ayDISTRIBUTE \at====\ax
+    /echo \aw    \ag/mac turbogive\ax
+    /echo \aw      default: you + each bot gives theirs\ax
+    /echo \aw    \ag/mac turbogive solo\ax
+    /echo \aw      only you give to group, no broadcast\ax
+    /echo \aw    \ag/mac turbogive solo all\ax
+    /echo \aw      only you give to all in zone, no broadcast\ax
+    /echo \aw    \ag/mac turbogive all\ax
+    /echo \aw      you + each e3 bot gives to all\ax
+    /echo \aw    \ag/mac turbogive \atCHARNAME\ax
+    /echo \aw      give my items to one character\ax
+    /echo \aw    \ag/mac turbogive tell \atCHARNAME\ax
+    /echo \aw      tell CHARNAME to give their items (single bot)\ax
+    /echo \aw \ax
+    /echo \at==== \ayHAND OUT \at====\ax
+    /echo \aw    \ag/mac turbogive hand \atCOUNT\ax
+    /echo \aw      pick up item, give COUNT to each\ax
+    /echo \aw    \ag/mac turbogive hand \atCOUNT ItemName\ax
+    /echo \aw      give COUNT of named item to each\ax
+    /echo \aw    \ag/mac turbogive hand \atCOUNT ItemName\ax \ag all\ax
+    /echo \aw      same, all e3 bots in zone\ax
+    /echo \aw    \ag/mac turbogive hand tell \atCHARNAME COUNT ItemName\ax \aw[\agall\aw]\ax
+    /echo \aw      tell CHARNAME to hand out from their inventory\ax
+    /echo \aw \ax
+    /echo \at==== \ayCOLLECT \at====\ax
+    /echo \aw    \ao/mac turbogive collect\ax
+    /echo \aw      group sends you your items\ax
+    /echo \aw    \ao/mac turbogive collect all\ax \aw(or \aocollect raid\ax)\ax
+    /echo \aw      all e3 bots send you your items\ax
+    /echo \aw    \ao/mac turbogive collect tell \atCHARNAME\ax \aw[\agall\aw]\ax
+    /echo \aw      tell CHARNAME to collect from their group (or all)\ax
+    /echo \aw \ax
+    /echo \at==== \ayBANK \at====\ax
+    /echo \aw    \apbank\ax \aw or \apbank all\ax
+    /echo \aw      tell others to pull (runner does not)\ax
+    /echo \aw    \ap/mac turbogive bank solo\ax
+    /echo \aw      I pull my own items from my bank\ax
+    /echo \aw    \ap/mac turbogive bank pull\ax
+    /echo \aw      I pull my bank for others (items assigned to them)\ax
+    /echo \aw    \ap/mac turbogive bank \atCHARNAME\ax
+    /echo \aw      I pull CHARNAME's items from my bank to my bags\ax
+    /echo \aw    \ap/mac turbogive bank tell \atCHARNAME\ax
+    /echo \aw      tell CHARNAME to pull their own items from their bank\ax
+    /echo \aw \ax
+    /echo \at==== \aySETUP \at====\ax
+    /echo \aw    \ayadd \atCHARNAME\ax \aw(or \ayadd target\ax)\ax
+    /echo \aw      add cursor item to character's list\ax
+    /echo \aw    \aylist\ax \aw or \aylist \atCHARNAME\ax \aw or \aylist target\ax
+    /echo \aw      show give-list (mine, named char, or target's)\ax
+    /echo \aw    \aystatus\ax
+    /echo \aw      config, recipients, zone\ax
+    /echo \aw    \ayhelp\ax
+    /echo \aw      this list\ax
+    /echo \aw \ax
+    /echo \at==== \ayINI FORMAT \at====\ax
+    /echo \aw  \ag[GiveList]\ax \aw in turboloot.ini:\ax
+    /echo \aw    \agItemName=\atCharName\ax \aw(exact)\ax
+    /echo \aw    \ag_prefix1=\atCharName\ax\ag:Spell:*\ax \aw(starts with)\ax
+    /echo \aw    \ag_prefix2=\atCharName\ax\ag:*Suffix\ax \aw(ends with)\ax
+    /echo \aw    \ag_wildcards=\atCharName\ax\ag|\atOtherChar\ax \aw([Wildcards])\ax
+    /echo \at----------------------------\ax
+    /echo \ap** \awAliases are recommended \ap**\ax
+    /echo \aghttps://www.github.com/drel-git/TurboLoot\ax \awfor more info\ax
+/return
+
+| =====================================================================
+| EVENT HANDLERS
+| =====================================================================
+Sub Event_CharDone(string line, string charName)
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Received 'done' signal (e3bct) from ${charName}"
+    /if (${Defined[_bankBroadcastMode]} && ${_bankBroadcastMode}) {
+        | Bank broadcast mode: count unique senders, set charDone when all received
+        /if (!${_bankReceivedFrom.Find[|${charName}|]}) {
+            /varset _bankReceivedFrom ${_bankReceivedFrom}${charName}|
+            /varcalc _bankReceivedCount ${_bankReceivedCount}+1
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Bank DONE from ${charName} (${_bankReceivedCount}/${_bankExpectedDone})"
+            /if (${_bankReceivedCount} >= ${_bankExpectedDone}) /varset charDone TRUE
+        }
+    } else {
+        /if (${Defined[charDone]}) /varset charDone TRUE
+    }
+/return
+
+Sub Event_CharDoneBC(string line, string senderName, string collectorName)
+    | Bank broadcast mode: accept DONE from any sender (orchestrator may not be group leader)
+    /if (${Defined[_bankBroadcastMode]} && ${_bankBroadcastMode}) {
+        /if (!${_bankReceivedFrom.Find[|${senderName}|]}) {
+            /varset _bankReceivedFrom ${_bankReceivedFrom}${senderName}|
+            /varcalc _bankReceivedCount ${_bankReceivedCount}+1
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Bank DONE from ${senderName} (${_bankReceivedCount}/${_bankExpectedDone})"
+            /if (${_bankReceivedCount} >= ${_bankExpectedDone}) /varset charDone TRUE
+        }
+        /return
+    }
+    | Normal mode: process when we are the collector, or when collector is ALL (broadcast to everyone)
+    /if (${collectorName.Equal[${Me.Name}]} || ${collectorName.Equal[ALL]}) {
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Received 'done' broadcast (e3bc) from ${senderName}"
+        /if (${Defined[charDone]}) /varset charDone TRUE
+    }
+/return
+
+Sub Event_CharDoneTell(string line, string charName)
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Received 'done' tell from ${charName}"
+    /if (${Defined[charDone]}) /varset charDone TRUE
+/return
+
+Sub Event_TradeCancelled
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Trade was cancelled"
+/return
+
+Sub Event_TradeComplete
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Trade completed"
+/return
+
+Sub Event_TooFar(string line, string npcName)
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Too far from ${npcName} to trade"
+/return
+
+| =====================================================================
+| WILDCARD & PREFIX MATCHING
+| =====================================================================
+
+| Checks item name against give-list patterns (prefix, suffix, or contains)
+| prefixList format: |P6:SPELL:||S8:OLEANDER||C10:DISTILLATE|
+|   P = prefix (starts with), S = suffix (ends with), C = contains
+Sub IsGivePrefix(string name)
+    /if (!${prefixList.Length}) /return FALSE
+
+    /declare u string local ${name.Upper}
+    /declare searchPos int local 1
+    /declare pipeEnd int local
+    /declare gpEntry string local
+    /declare gpType string local
+    /declare colonPos int local
+    /declare gpLen int local
+    /declare gpText string local
+    /declare gpChunk string local
+
+:nextGivePrefix
+    /varset searchPos ${Math.Calc[${searchPos}+1]}
+    /if (${searchPos} >= ${prefixList.Length}) /return FALSE
+
+    /varset gpChunk ${prefixList.Mid[${searchPos},500]}
+    /if (!${gpChunk.Length}) /return FALSE
+
+    /varset pipeEnd ${gpChunk.Find[|]}
+    /if (!${pipeEnd} || ${pipeEnd} < 4) /return FALSE
+
+    /varset gpEntry ${gpChunk.Left[${Math.Calc[${pipeEnd}-1]}]}
+    /varset searchPos ${Math.Calc[${searchPos}+${pipeEnd}-1]}
+
+    | First char is the type tag (P/S/C)
+    /varset gpType ${gpEntry.Left[1]}
+    /varset gpEntry ${gpEntry.Right[-1]}
+
+    /varset colonPos ${gpEntry.Find[:]}
+    /if (!${colonPos}) /goto :nextGivePrefix
+
+    /varset gpLen ${Int[${gpEntry.Left[${Math.Calc[${colonPos}-1]}]}]}
+    /if (${gpLen} < 1) /goto :nextGivePrefix
+
+    /varset gpText ${gpEntry.Mid[${Math.Calc[${colonPos}+1]},${gpLen}]}
+
+    | Branch on match type
+    /if (${gpType.Equal[P]}) {
+        | Prefix: starts with
+        /if (${gpLen} > ${u.Length}) /goto :nextGivePrefix
+        /if (${u.Left[${gpLen}].Equal[${gpText}]}) /return TRUE
+    } else /if (${gpType.Equal[S]}) {
+        | Suffix: ends with
+        /if (${gpLen} > ${u.Length}) /goto :nextGivePrefix
+        /if (${u.Right[${gpLen}].Equal[${gpText}]}) /return TRUE
+    } else /if (${gpType.Equal[C]}) {
+        | Contains: anywhere in name
+        /if (${u.Find[${gpText}]}) /return TRUE
+    }
+
+    /goto :nextGivePrefix
+/return FALSE
+
+| Checks item name against shared [Wildcards] section prefixes
+| wildcardPrefixes format: |6:SPELL:||5:SONG:||8:TOME OF |
+| wildcardFirstChars format: |S|T| (unique first characters of all wildcards)
+Sub IsWildcardItem(string name)
+    /if (!${wildcardPrefixes.Length}) /return FALSE
+
+    /declare u string local ${name.Upper}
+
+    | Fast reject: if item's first char isn't in any wildcard's first char, skip entirely
+    /if (${Defined[wildcardFirstChars]} && ${wildcardFirstChars.Length}) {
+        /if (!${wildcardFirstChars.Find[|${u.Left[1]}|]}) /return FALSE
+    }
+
+    /declare searchPos int local 1
+    /declare pipeEnd int local
+    /declare wcEntry string local
+    /declare colonPos int local
+    /declare wcPrefixLen int local
+    /declare wcPrefix string local
+    /declare wcChunk string local
+
+:nextWildcard
+    /varset searchPos ${Math.Calc[${searchPos}+1]}
+    /if (${searchPos} >= ${wildcardPrefixes.Length}) /return FALSE
+
+    /varset wcChunk ${wildcardPrefixes.Mid[${searchPos},500]}
+    /if (!${wcChunk.Length}) /return FALSE
+
+    /varset pipeEnd ${wcChunk.Find[|]}
+    /if (!${pipeEnd} || ${pipeEnd} < 3) /return FALSE
+
+    /varset wcEntry ${wcChunk.Left[${Math.Calc[${pipeEnd}-1]}]}
+    /varset searchPos ${Math.Calc[${searchPos}+${pipeEnd}-1]}
+
+    /varset colonPos ${wcEntry.Find[:]}
+    /if (!${colonPos}) /goto :nextWildcard
+
+    /varset wcPrefixLen ${Int[${wcEntry.Left[${Math.Calc[${colonPos}-1]}]}]}
+    /if (${wcPrefixLen} < 1 || ${wcPrefixLen} > ${u.Length}) /goto :nextWildcard
+
+    /varset wcPrefix ${wcEntry.Mid[${Math.Calc[${colonPos}+1]},${wcPrefixLen}]}
+    /if (${u.Left[${wcPrefixLen}].Equal[${wcPrefix}]}) /return TRUE
+
+    /goto :nextWildcard
+/return FALSE
+
+| Loads shared wildcard prefixes from [Wildcards] section in turboloot.ini
+Sub LoadWildcards
+    /if (!${Defined[wildcardPrefixes]}) {
+        /declare wildcardPrefixes string outer
+    }
+    /varset wildcardPrefixes
+
+    /declare wcVal string local
+    /declare wcUpper string local
+    /declare wcLen int local
+
+    /varset wcVal ${Ini[${iniFile},Wildcards,Spell:]}
+    /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) {
+        /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+        /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
+            /varset wildcardPrefixes ${wildcardPrefixes}|6:SPELL:
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Shared wildcard loaded: [Spell:] (6 chars)"
+        }
+    }
+
+    /varset wcVal ${Ini[${iniFile},Wildcards,Skill:]}
+    /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) {
+        /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+        /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
+            /varset wildcardPrefixes ${wildcardPrefixes}|6:SKILL:
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Shared wildcard loaded: [Skill:] (6 chars)"
+        }
+    }
+
+    /varset wcVal ${Ini[${iniFile},Wildcards,Song:]}
+    /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) {
+        /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+        /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
+            /varset wildcardPrefixes ${wildcardPrefixes}|5:SONG:
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Shared wildcard loaded: [Song:] (5 chars)"
+        }
+    }
+
+    /varset wcVal ${Ini[${iniFile},Wildcards,Tome ]}
+    /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) {
+        /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+        /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
+            /varset wildcardPrefixes ${wildcardPrefixes}|5:TOME 
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Shared wildcard loaded: [Tome ] (5 chars)"
+        }
+    }
+
+    /varset wcVal ${Ini[${iniFile},Wildcards,Tome of ]}
+    /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) {
+        /varset wcUpper ${wcVal.Upper.Replace[ ,]}
+        /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
+            /varset wildcardPrefixes ${wildcardPrefixes}|8:TOME OF 
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Shared wildcard loaded: [Tome of ] (8 chars)"
+        }
+    }
+
+    | Custom wildcards: Wildcard1 through Wildcard20
+    /declare i int local
+    /declare rawPrefix string local
+    /for i 1 to 20
+        /varset wcVal ${Ini[${iniFile},Wildcards,Wildcard${i}]}
+        /if (${wcVal.Length} && !${wcVal.Equal[NULL]}) {
+            /varset rawPrefix ${wcVal}
+            /if (${rawPrefix.Length}) {
+                /varset wcLen ${rawPrefix.Length}
+                /varset wildcardPrefixes ${wildcardPrefixes}|${wcLen}:${rawPrefix.Upper}
+                /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Shared wildcard loaded: [${rawPrefix}] (${wcLen} chars)"
+            }
+        }
+    /next i
+
+    /if (${wildcardPrefixes.Length}) {
+        /varset wildcardPrefixes ${wildcardPrefixes}|
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Shared wildcards active: ${wildcardPrefixes}"
+
+        | Build fast first-character lookup string for quick rejection
+        | Extract unique first characters from each wildcard prefix
+        /if (!${Defined[wildcardFirstChars]}) {
+            /declare wildcardFirstChars string outer |
+        } else {
+            /varset wildcardFirstChars |
+        }
+        /declare fcPos int local 1
+        /declare fcChunk string local
+        /declare fcPipe int local
+        /declare fcEntry string local
+        /declare fcColon int local
+        /declare fcPrefixText string local
+        /declare fcFirstChar string local
+
+:nextFCWildcard
+        /varset fcPos ${Math.Calc[${fcPos}+1]}
+        /if (${fcPos} >= ${wildcardPrefixes.Length}) /goto :doneFCWildcard
+        /varset fcChunk ${wildcardPrefixes.Mid[${fcPos},500]}
+        /if (!${fcChunk.Length}) /goto :doneFCWildcard
+        /varset fcPipe ${fcChunk.Find[|]}
+        /if (!${fcPipe} || ${fcPipe} < 3) /goto :doneFCWildcard
+        /varset fcEntry ${fcChunk.Left[${Math.Calc[${fcPipe}-1]}]}
+        /varset fcPos ${Math.Calc[${fcPos}+${fcPipe}-1]}
+        /varset fcColon ${fcEntry.Find[:]}
+        /if (!${fcColon}) /goto :nextFCWildcard
+        /varset fcPrefixText ${fcEntry.Mid[${Math.Calc[${fcColon}+1]},1]}
+        /if (${fcPrefixText.Length} && !${wildcardFirstChars.Find[|${fcPrefixText}|]}) {
+            /varset wildcardFirstChars ${wildcardFirstChars}${fcPrefixText}|
+        }
+        /goto :nextFCWildcard
+:doneFCWildcard
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Wildcard first chars: ${wildcardFirstChars}"
+    } else {
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] No shared wildcards active"
+    }
+/return
+
+| =====================================================================
+| NAV TO ID WITH DOORS + NUDGES
+| Reissues /nav if it stops early. If stuck (no movement progress),
+| tries to open nearby doors and nudge with forward + strafe.
+| Args: targetID, stopDist, maxTicks (10 ticks ~= 1 second)
+| (Mirrors TurboLoot's NavToIDWithDoorsAndNudges)
+| =====================================================================
+Sub NavToIDWithDoorsAndNudges(int targetID, float stopDist, int maxTicks)
+    /declare tid int local ${targetID}
+    /declare distGoal float local ${stopDist}
+    /declare limit int local ${maxTicks}
+
+    /declare navTicks int local 0
+    /declare lastDist float local 999999
+    /declare stuckCount int local 0
+    /declare lastX float local ${Me.X}
+    /declare lastY float local ${Me.Y}
+    /declare nudgeFlip bool local FALSE
+
+    /squelch /nav stop
+    /nav id ${tid} distance=${distGoal}
+
+:NavIDLoop
+    /doevents
+    /delay 1
+    /varcalc navTicks ${navTicks} + 1
+
+    /if (!${Target.ID} || ${Target.ID} != ${tid}) {
+        /squelch /nav stop
+        /return
+    }
+
+    /if (${Target.Distance} <= ${distGoal}) {
+        /squelch /nav stop
+        /return
+    }
+
+    | Stuck detection: no distance or position change
+    /if (${Math.Abs[${Target.Distance} - ${lastDist}]} < 0.5 && ${Math.Abs[${Me.X}-${lastX}]} < 0.5 && ${Math.Abs[${Me.Y}-${lastY}]} < 0.5) {
+        /varcalc stuckCount ${stuckCount} + 1
+    } else {
+        /varset stuckCount 0
+    }
+    /varset lastDist ${Target.Distance}
+    /varset lastX ${Me.X}
+    /varset lastY ${Me.Y}
+
+    | Reissue nav if it stopped early
+    /if (!${Navigation.Active} && ${Target.Distance} > (${distGoal} + 2)) {
+        /nav id ${tid} distance=${distGoal}
+    }
+
+    | Stuck — try opening doors and nudging
+    /if (${stuckCount} >= 30) {
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Nav stuck (dist=${Target.Distance}) - trying door + nudge..."
+        /squelch /nav stop
+        /call TryOpenNearbyDoor 40
+        /face fast
+        /delay 1
+
+        | Nudge: forward + alternating strafe
+        /keypress forward hold
+        /delay 2
+        /keypress forward
+
+        /if (!${nudgeFlip}) {
+            /keypress strafe_left hold
+            /delay 2
+            /keypress strafe_left
+            /varset nudgeFlip TRUE
+        } else {
+            /keypress strafe_right hold
+            /delay 2
+            /keypress strafe_right
+            /varset nudgeFlip FALSE
+        }
+
+        /varset stuckCount 0
+        /nav id ${tid} distance=${distGoal}
+    }
+
+    | Periodic door check
+    /if (${Math.Calc[${navTicks}%20]} == 0) {
+        /call TryOpenNearbyDoor 40
+    }
+
+    /if (${navTicks} >= ${limit}) {
+        /squelch /nav stop
+        /return
+    }
+
+    /goto :NavIDLoop
+/return
+
+| =====================================================================
+| TRY OPEN NEARBY DOOR
+| =====================================================================
+Sub TryOpenNearbyDoor(int radius)
+    /declare r int local ${radius}
+    /if (${r} <= 0) /varset r 35
+
+    /if (${SpawnCount[door radius ${r}]} == 0) /return FALSE
+
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Door nearby (within ${r}) - attempting to open..."
+    /doortarget
+    /delay 2
+
+    /if (${DoorTarget.ID}) {
+        /click left door
+        /delay 10
+        /return TRUE
+    }
+/return FALSE
+
+| =====================================================================
+| UTILITY SUBS
+| =====================================================================
+Sub CloseBags
+    /declare bag int local
+    /for bag 1 to 10
+        /if (${Window[pack${bag}].Open}) /nomodkey /itemnotify pack${bag} rightmouseup
+    /next bag
+    /if (${Window[InventoryWindow].Open}) /nomodkey /notify InventoryWindow DoneButton leftmouseup
+/return
+
+| ForceClearCursor — retry /autoinventory up to 5 times (TurboLoot pattern for cursor-stuck resilience)
+Sub ForceClearCursor
+    /declare clearTries int local 0
+    /while (${Cursor.ID} && ${clearTries} < 5) {
+        /varcalc clearTries ${clearTries}+1
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboGive] Cursor has item: ${Cursor.Name} - clearing (attempt ${clearTries})"
+        /autoinventory
+        /delay 5 !${Cursor.ID}
+        /if (${Cursor.ID}) {
+            /autoi
+            /delay 5 !${Cursor.ID}
+        }
+    }
+/return
+
+Sub LogDebug(string msg)
+    /if (${showDebug}) /echo ${msg}
+    /if (${logToFile} && ${logLevel} <= 0) {
+        /call StripColorCodes "${msg}"
+        /squelch /mqlog [${Time}] [turboGive] [DEBUG] ${Macro.Return}
+    }
+/return
+
+| LogInfo: informational; echo when showDebug, file when logToFile and logLevel<=INFO
+Sub LogInfo(string msg)
+    /if (${showDebug}) /echo ${msg}
+    /if (${logToFile} && ${logLevel} <= 1) {
+        /call StripColorCodes "${msg}"
+        /squelch /mqlog [${Time}] [turboGive] [INFO] ${Macro.Return}
+    }
+/return
+
+| LogWarn: always echo (yellow); file when logToFile and logLevel<=WARN
+Sub LogWarn(string msg)
+    /echo ${tgTag} \ay${msg}
+    /if (${logToFile} && ${logLevel} <= 2) {
+        /call StripColorCodes "${msg}"
+        /squelch /mqlog [${Time}] [turboGive] [WARN] ${Macro.Return}
+    }
+/return
+
+| LogError: always echo (red); file when logToFile and logLevel<=ERROR
+Sub LogError(string msg)
+    /echo ${tgTag} \ar${msg}
+    /if (${logToFile} && ${logLevel} <= 3) {
+        /call StripColorCodes "${msg}"
+        /squelch /mqlog [${Time}] [turboGive] [ERROR] ${Macro.Return}
+    }
+/return
+
+Sub StripColorCodes(string msg)
+    /declare result string local ${msg}
+    /varset result ${result.Replace[\at,]}
+    /varset result ${result.Replace[\ao,]}
+    /varset result ${result.Replace[\ag,]}
+    /varset result ${result.Replace[\ar,]}
+    /varset result ${result.Replace[\am,]}
+    /varset result ${result.Replace[\au,]}
+    /varset result ${result.Replace[\aw,]}
+    /varset result ${result.Replace[\ax,]}
+    /varset result ${result.Replace[\ay,]}
+    /varset result ${result.Replace[\ap,]}
+/return ${result}
+
+Sub Announce(string method, string msg)
+    /if (!${method.Length}) /return
+    /declare mUpper string local ${method.Upper}
+    /if (${mUpper.Equal[ECHO]} || ${mUpper.Equal[E3BC]}) {
+        /squelch /docommand /${method} ${msg}
+        /return
+    }
+    /docommand /${method} ${msg}
+/return
