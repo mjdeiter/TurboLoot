@@ -95,7 +95,7 @@ bankWildcards=ON
 StopLootWhenAttacked=OFF
 returnToLeader=ON
 dropLevBeforeNav=OFF
-; OFF = default (reliable). Set ON for more aggressive timing if your setup handles it.
+; OFF = default (fast and reliable). Set ON if you have a setup that can handle it (fastest, but can skip loot if you have a bad connection)
 FastLootMode=OFF
 
 ; --Announcements--
