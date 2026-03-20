@@ -1,14 +1,15 @@
+|   *  *  *  *  *  *  *  *  *  *  [  T u r b o L o o t  ]  *  *  *  *  *  *  *  *  *  *
 | _______ _    _ _____  ____   ____  _      ____   ____ _______ 
 | __   __| |  | |  __ \|  _ \ / __ \| |    / __ \ / __ \__   __|
 |   | |  | |  | | |__) | |_) | |  | | |   | |  | | |  | | | |   
 |   | |  | |  | |  _  /|  _ <| |  | | |   | |  | | |  | | | |   
 |   | |  | |__| | | \ \| |_) | |__| | |___| |__| | |__| | | |   
 |   |_|   \____/|_|  \_\____/ \____/|______\____/ \____/  |_|
-|------------------------------------------------------------------>
-
-| turboLoot 3.7.8
+|-------------------------------------------------------------------------------------->
+|           https://www.github.com/drel-git/TurboLoot
+|                 TurboLoot 3.7.9 - 3/19/26
 | Made by: <Lederhosen>, Drel, Jabs, Matde, Belakk, Veldrinn, Zhugg, Kroaking, Jeremy
-
+|========================================================================================
 #turbo 100
 #event Unlootable "You may not loot this corpse at this time."
 #event TooFar "You are too far away to loot that corpse."
@@ -137,6 +138,7 @@ Sub Main
     /if (${stopLootWhenAttacked}) {
         /if (${SpawnCount[npc radius ${lootDistance} los playerstate 4]}) {
             /echo ${tlTag} \arWARNING: STOPPING turboLoot - Aggressive mobs detected in loot area!
+            /if (${Defined[logToFile]} && ${logToFile}) /call LogError "Stopping: aggressive mobs detected in loot area"
             /call Cleanup
             /return
         }
@@ -210,7 +212,7 @@ Sub InitState
     /declare finalSweepEnabled int outer 1
     /declare finalSweepRadiusFeet int outer 0
     /declare useNavForCorpses int outer 0
-    /declare fastLootMode bool outer TRUE
+    /declare fastLootMode bool outer FALSE
     /declare RightClickLoot bool outer TRUE
     /declare moveLoopDelay int outer 2
     /declare cursorClearDelay int outer 1
@@ -252,6 +254,7 @@ Sub InitState
     /declare sellWildcards bool outer FALSE
     /declare bankWildcards bool outer FALSE
     /declare wildcardPrefixes string outer ""
+    /declare wildcardFirstChars string outer ""
     /declare packNum int outer 0
     /declare slotNum int outer 0
     /declare maxSlots int outer 0
@@ -298,6 +301,7 @@ Sub InitStateMinimal
     /declare bankWildcards bool outer FALSE
     /declare sellWildcards bool outer FALSE
     /declare wildcardPrefixes string outer ""
+    /declare wildcardFirstChars string outer ""
     /declare packNum int outer 0
     /declare slotNum int outer 0
     /declare tributeItemsMoved int outer 0
@@ -420,6 +424,20 @@ Sub LoadSettingsMinimal(string modeParam)
     } else {
         /varset logToFile FALSE
     }
+    | logLevel: DEBUG=0, INFO=1, WARN=2, ERROR=3. File logs only entries at or above this level. Default INFO.
+    /if (!${Defined[logLevel]}) {
+        /declare logLevel int outer 1
+    } else {
+        /varset logLevel 1
+    }
+    /declare logLevelSetting string local ${IniGetStringOrEmpty[Settings,logLevel]}
+    /if (${logLevelSetting.Length}) {
+        /declare logLevelUpper string local ${logLevelSetting.Upper.Replace[ ,]}
+        /if (${logLevelUpper.Equal[DEBUG]}) /varset logLevel 0
+        /if (${logLevelUpper.Equal[INFO]}) /varset logLevel 1
+        /if (${logLevelUpper.Equal[WARN]}) /varset logLevel 2
+        /if (${logLevelUpper.Equal[ERROR]}) /varset logLevel 3
+    }
     
     /declare bankSellProgressSetting string local ${IniGetStringOrEmpty[Settings,announceBankSellProgress]}
     /if (${bankSellProgressSetting.Length}) {
@@ -467,12 +485,17 @@ Sub LoadSettingsMinimal(string modeParam)
 
     /declare announceDefaultToSetting string local ${IniGetStringOrEmpty[Settings,announceDefaultTo]}
     /varset announceDefaultTo ${announceDefaultToSetting}
-    /varset announceDefaultTo ${NormalizeAnnounceMethod[${announceDefaultTo}]}
+    /call NormalizeAnnounceMethod "${announceDefaultTo}"
+    /varset announceDefaultTo ${Macro.Return}
     /declare announceDefaultUpper string local ${announceDefaultTo.Upper.Replace[ ,]}
     /if (!${announceDefaultTo.Length} || ${announceDefaultTo.Equal[NULL]} || ${announceDefaultTo.Equal[null]} || ${announceDefaultUpper.Equal[0]} || ${announceDefaultUpper.Equal[OFF]}) /varset announceDefaultTo "echo"
-    /declare announceDoneLootingSetting string local ${IniGetStringOrEmpty[Settings,announceDoneLootingTo]}
+    | /call avoids ${IniGetStringOrEmpty[Settings,announceDoneLootingTo]} substituting outer announceDoneLootingTo as the key
+    /declare announceDoneLootingSetting string local
+    /call IniGetStringOrEmpty Settings announceDoneLootingTo
+    /varset announceDoneLootingSetting ${Macro.Return}
     /if (${announceDoneLootingSetting.Length}) {
-        /varset announceDoneLootingTo ${NormalizeAnnounceMethod[${announceDoneLootingSetting}]}
+        /call NormalizeAnnounceMethod "${announceDoneLootingSetting}"
+        /varset announceDoneLootingTo ${Macro.Return}
     }
     /if (!${announceDoneLootingTo.Length} || ${announceDoneLootingTo.Equal[NULL]}) /varset announceDoneLootingTo ${announceDefaultTo}
     /declare announceBankSellToSetting string local ${IniGetStringOrEmpty[Settings,announceBankSellTributeTo]}
@@ -493,19 +516,23 @@ Sub LoadSettingsMinimal(string modeParam)
     }
     /declare bankSellResolved string local ""
     /if (${bankSellAnnounceSetting.Length}) {
-        /varset bankSellResolved ${NormalizeAnnounceMethod[${bankSellAnnounceSetting}]}
+        /call NormalizeAnnounceMethod "${bankSellAnnounceSetting}"
+        /varset bankSellResolved ${Macro.Return}
     }
     /if (!${bankSellResolved.Length} && ${bankSellToDisable}) {
         /varset bankSellResolved "OFF"
     }
     /if (!${bankSellResolved.Length} && ${bankSellToMethod.Length}) {
-        /varset bankSellResolved ${NormalizeAnnounceMethod[${bankSellToMethod}]}
+        /call NormalizeAnnounceMethod "${bankSellToMethod}"
+        /varset bankSellResolved ${Macro.Return}
     }
     /if (!${bankSellResolved.Length} && ${legacyAnnounceBankSellSetting.Length}) {
-        /varset bankSellResolved ${NormalizeAnnounceMethod[${legacyAnnounceBankSellSetting}]}
+        /call NormalizeAnnounceMethod "${legacyAnnounceBankSellSetting}"
+        /varset bankSellResolved ${Macro.Return}
     }
     /if (!${bankSellResolved.Length} && ${announceDefaultToSetting.Length}) {
-        /varset bankSellResolved ${NormalizeAnnounceMethod[${announceDefaultToSetting}]}
+        /call NormalizeAnnounceMethod "${announceDefaultToSetting}"
+        /varset bankSellResolved ${Macro.Return}
     }
     /if (!${bankSellResolved.Length} || ${bankSellResolved.Equal[Null]}) {
         /varset bankSellResolved "echo"
@@ -703,6 +730,20 @@ Sub LoadSettings
     } else {
         /varset logToFile FALSE
     }
+    | logLevel: DEBUG=0, INFO=1, WARN=2, ERROR=3. File logs only entries at or above this level.
+    /if (!${Defined[logLevel]}) {
+        /declare logLevel int outer 1
+    } else {
+        /varset logLevel 1
+    }
+    /declare logLevelSetting string local ${IniGetStringOrEmpty[Settings,logLevel]}
+    /if (${logLevelSetting.Length}) {
+        /declare logLevelUpper string local ${logLevelSetting.Upper.Replace[ ,]}
+        /if (${logLevelUpper.Equal[DEBUG]}) /varset logLevel 0
+        /if (${logLevelUpper.Equal[INFO]}) /varset logLevel 1
+        /if (${logLevelUpper.Equal[WARN]}) /varset logLevel 2
+        /if (${logLevelUpper.Equal[ERROR]}) /varset logLevel 3
+    }
 
     | StopLootWhenAttacked: stop looting if aggressive mobs are in loot area (default: OFF)
     /declare stopLootSetting string local ${IniGetStringOrEmpty[Settings,StopLootWhenAttacked]}
@@ -795,9 +836,19 @@ Sub LoadSettings
 
     /declare announceDefaultToSetting string local ${IniGetStringOrEmpty[Settings,announceDefaultTo]}
     /varset announceDefaultTo ${announceDefaultToSetting}
-    /varset announceDefaultTo ${TrimSpaces[${announceDefaultTo}]}
+    /call TrimSpaces "${announceDefaultTo}"
+    /varset announceDefaultTo ${Macro.Return}
     /declare announceDefaultUpper string local ${announceDefaultTo.Upper.Replace[ ,]}
     /if (!${announceDefaultTo.Length} || ${announceDefaultTo.Equal[NULL]} || ${announceDefaultTo.Equal[null]} || ${announceDefaultUpper.Equal[0]} || ${announceDefaultUpper.Equal[OFF]}) /varset announceDefaultTo "echo"
+    | Main loot used InitState default only- LoadSettingsMinimal had INI read but full LoadSettings did not
+    /declare announceDoneLootingSetting string local
+    /call IniGetStringOrEmpty Settings announceDoneLootingTo
+    /varset announceDoneLootingSetting ${Macro.Return}
+    /if (${announceDoneLootingSetting.Length}) {
+        /call NormalizeAnnounceMethod "${announceDoneLootingSetting}"
+        /varset announceDoneLootingTo ${Macro.Return}
+    }
+    /if (!${announceDoneLootingTo.Length} || ${announceDoneLootingTo.Equal[NULL]}) /varset announceDoneLootingTo ${announceDefaultTo}
     /declare announceLootToSetting string local ${IniGetStringOrEmpty[Settings,announceLootTo]}
     /declare announceDestroyToSetting string local ${IniGetStringOrEmpty[Settings,announceDestroyTo]}
     /declare announceBankSellToSetting string local ${IniGetStringOrEmpty[Settings,announceBankSellTributeTo]}
@@ -1194,12 +1245,12 @@ Sub LoadSettings
             /varset itemLootWaitDelay 2
         }
     } else {
-        /varset fastLootMode TRUE
-        /varset useNavForCorpses 0
-        /varset moveLoopDelay 2
-        /varset cursorClearDelay 1
-        /varset lootWindowDelay 3
-        /varset itemLootWaitDelay 2
+        | Default when [Settings] omits FastLootMode: OFF (reliable); set ON in INI for aggressive timing.
+        /varset fastLootMode FALSE
+        /varset moveLoopDelay 3
+        /varset cursorClearDelay 2
+        /varset lootWindowDelay 5
+        /varset itemLootWaitDelay 3
     }
 
     /declare rightClickSetting string local ${IniGetStringOrEmpty[Settings,RightClickLoot]}
@@ -1257,11 +1308,16 @@ Sub LoadSettings
     /if (!${announceSkippedMethod.Length} || ${announceSkippedMethod.Equal[Null]}) /varset announceSkippedMethod ${announceDefaultTo}
     /if (!${announceBankSell.Length} || ${announceBankSell.Equal[Null]}) /varset announceBankSell ${announceDefaultTo}
     /if (!${announceSummaryMethod.Length} || ${announceSummaryMethod.Equal[Null]}) /varset announceSummaryMethod ${announceDefaultTo}
-    /varset announceMethod ${NormalizeAnnounceMethod[${announceMethod}]}
-    /varset announceLoreMethod ${NormalizeAnnounceMethod[${announceLoreMethod}]}
-    /varset announceSkippedMethod ${NormalizeAnnounceMethod[${announceSkippedMethod}]}
-    /varset announceBankSell ${NormalizeAnnounceMethod[${announceBankSell}]}
-    /varset announceSummaryMethod ${NormalizeAnnounceMethod[${announceSummaryMethod}]}
+    /call NormalizeAnnounceMethod "${announceMethod}"
+    /varset announceMethod ${Macro.Return}
+    /call NormalizeAnnounceMethod "${announceLoreMethod}"
+    /varset announceLoreMethod ${Macro.Return}
+    /call NormalizeAnnounceMethod "${announceSkippedMethod}"
+    /varset announceSkippedMethod ${Macro.Return}
+    /call NormalizeAnnounceMethod "${announceBankSell}"
+    /varset announceBankSell ${Macro.Return}
+    /call NormalizeAnnounceMethod "${announceSummaryMethod}"
+    /varset announceSummaryMethod ${Macro.Return}
     /if (!${announceMethod.Length}) /varset announceMethod ${announceDefaultTo}
     /if (!${announceLoreMethod.Length}) /varset announceLoreMethod ${announceDefaultTo}
     /if (!${announceSkippedMethod.Length}) /varset announceSkippedMethod ${announceDefaultTo}
@@ -1274,7 +1330,8 @@ Sub LoadSettings
             /varset announceSkipped 0
         } else /if (!${skipToFinalUpper.Equal[1]} && !${skipToFinalUpper.Equal[ON]}) {
             /varset announceSkipped 1
-            /varset announceSkippedMethod ${NormalizeAnnounceMethod[${announceSkipToSetting}]}
+            /call NormalizeAnnounceMethod "${announceSkipToSetting}"
+            /varset announceSkippedMethod ${Macro.Return}
         }
     }
 
@@ -1301,7 +1358,7 @@ Sub LoadSettings
     /docommand /lootnodrop ${lootNoDropPrompt}
 
     /if (${showDebug} || ${logToFile}) {
-        /call LogDebug "[turboLoot] DBG announceDefaultTo=\"${announceDefaultTo}\" announceMethod=\"${announceMethod}\" announceLoot=${announceLooted} announceDestroy=${announceDestroyed} announceLore=${announceLore} announceSkipped=${announceSkipped} announceRunSummary=${announceSummary}"
+        /call LogDebug "[turboLoot] DBG announceDefaultTo=\"${announceDefaultTo}\" announceDoneLootingTo=\"${announceDoneLootingTo}\" announceMethod=\"${announceMethod}\" announceLoot=${announceLooted} announceDestroy=${announceDestroyed} announceLore=${announceLore} announceSkipped=${announceSkipped} announceRunSummary=${announceSummary}"
         /call LogDebug "[turboLoot] DBG loreMethod=\"${announceLoreMethod}\" skipMethod=\"${announceSkippedMethod}\" bankSellMethod=\"${announceBankSell}\""
         /call LogDebug "[turboLoot] DBG announceSkipToSetting=\"${announceSkipToSetting}\" skipAnnounceSetting=\"${skipAnnounceSetting}\""
     }
@@ -1420,13 +1477,7 @@ Sub LoadSettings
 | PRECHECKS
 | ---------------------------------------------------------------------
 Sub PreChecks
-    /if (${Me.Feigning}) {
-        /if (${Me.Grouped}) /docommand /${announceMethod} [FEIGNED] Currently FD and not looting
-        /docommand /lootnodrop ${lootNoDropPromptReset}
-        /varset turboLootRunning FALSE
-        /call Cleanup
-        /endmac
-    }
+    /call CheckFeignDeath
 
     /if (${Defined[turboLootCooldown]}) {
         /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Cooldown active. Skipping to prevent event spam."
@@ -1492,6 +1543,7 @@ Sub BeginLooting
     /if (${corpseHideMode.Equal[ALL]} || ${corpseHideMode.Equal[SELF]} || ${corpseHideMode.Equal[LOOTED]}) /squelch /hidecorpse looted
     /varset LoreDeniedNames ""
     /echo ${tlTag} \ag[${Time}] Started Looting \at(range: ${lootDistance} ft)${If[${fastLootMode},\ao [FastLootMode]\ax,]}${If[${RightClickLoot},\ao [RightClickLoot]\ax,]}${If[${corpseHideMode.Equal[OFF]},\ar [corpseHideMode=OFF]\ax,]}
+    /if (${logToFile}) /call LogInfo "Started looting (range: ${lootDistance} ft)"
     /varset minFreeSlotsDuringLoot ${Me.FreeInventory}
 
     /declare corpseCount int local 0
@@ -1506,6 +1558,8 @@ Sub BeginLooting
     /declare _lootFailCorpseID int local 0
     /declare _failedCorpseID int local 0
     /declare _reopenCorpseID int local 0
+    | Captured right after /call ShouldAnnounceDoneLooting (LogDebug must not sit between call and capture)
+    /declare _doneLootGate int local 0
 
 :mainlootloop
     /squelch /afollow pause
@@ -1524,6 +1578,7 @@ Sub BeginLooting
     /if (${stopLootWhenAttacked}) {
         /if (${SpawnCount[npc radius ${lootDistance} los playerstate 4]}) {
             /echo ${tlTag} \arWARNING: STOPPING turboLoot - Aggressive mobs detected in loot area!
+            /if (${logToFile}) /call LogError "Stopping: aggressive mobs detected in loot area"
             /if (${AlertIndex}) /squelch /alert clear ${AlertIndex}
             /call CloseBags
             /deletevar turboLootRunning
@@ -1561,23 +1616,27 @@ Sub BeginLooting
                 /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Corpse ${_reopenCorpseID} in range (spawn list stale) - retargeting to finish INI items"
                 /target id ${_reopenCorpseID}
                 /varset corpseID ${_reopenCorpseID}
+                /call CheckFeignDeath
                 /if (${Target.ID} == ${_reopenCorpseID}) /goto :doneMoving
             } else /if (${Spawn[${_reopenCorpseID}].Distance} < 200) {
                 | Corpse out of range - move to it
                 /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Corpse ${_reopenCorpseID} at ${Spawn[${_reopenCorpseID}].Distance} ft (reopen failed) - moving to retry INI items"
                 /target id ${_reopenCorpseID}
-                /delay 1
+                /delay 1 ${Target.ID} == ${_reopenCorpseID}
                 /if (${Target.ID} == ${_reopenCorpseID}) {
                     /if (${useNavForCorpses} && ${Navigation.PathExists[id ${_reopenCorpseID}]}) {
                         /nav id ${_reopenCorpseID} distance=10
                         /delay 100 !${Navigation.Active} || ${Spawn[${_reopenCorpseID}].Distance} <= 15
+                        /call CheckFeignDeath
                         /if (${Navigation.Active}) /squelch /nav stop
                     } else {
                         /moveto id ${_reopenCorpseID} dist 10
                         /delay 50 ${Spawn[${_reopenCorpseID}].Distance} <= 15
+                        /call CheckFeignDeath
                     }
                     /delay 1
                     /varset corpseID ${_reopenCorpseID}
+                    /call CheckFeignDeath
                     /if (${Target.ID} == ${_reopenCorpseID} && ${Spawn[${_reopenCorpseID}].Distance} <= 15) /goto :doneMoving
                 }
             }
@@ -1624,6 +1683,7 @@ Sub BeginLooting
     /varcalc mainLoopIterations ${mainLoopIterations}+1
     /if (${mainLoopIterations} > ${maxMainLoopIterations}) {
         /echo [turboLoot] WARNING: Main loop exceeded ${maxMainLoopIterations} iterations. Exiting to prevent infinite loop.
+    /if (${logToFile}) /call LogError "Main loop exceeded ${maxMainLoopIterations} iterations - exiting"
         /e3p off
         /deletevar turboLootRunning
         /varset mainLoopIterations 0
@@ -1681,18 +1741,7 @@ Sub BeginLooting
                     /goto :mainlootloop
                 }
                 
-                | FD check before movement
-                | Always resume E3Next on FD abort (macro paused E3 with /e3p on at start)
-                /if (${Me.Feigning}) {
-                    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Went FD mid-run - exiting and resuming E3"
-                    /if (${Me.Grouped}) /docommand /${announceMethod} [FEIGNED] Currently FD and not looting
-                    /e3p off
-                    /deletevar turboLootRunning
-                    /if (${Defined[turboLootSafetyNet]}) /deletevar turboLootSafetyNet
-                    /docommand /lootnodrop ${lootNoDropPromptReset}
-                    /call UnpauseAFollow
-                    /endmac
-                }
+                /call CheckFeignDeath
                 
                 /varset moveTries 0
                 /face fast
@@ -1707,8 +1756,8 @@ Sub BeginLooting
                     /if (${Navigation.PathExists[id ${Target.ID}]}) {
                         /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Using /nav to reach corpse ${Target.ID} (distance: ${Target.Distance})"
                         /nav id ${Target.ID} distance=10
-                        | Wait for nav to complete (up to 10 seconds)
                         /delay 100 !${Navigation.Active} || ${Target.Distance} <= 10
+                        /call CheckFeignDeath
                         /if (${Navigation.Active}) {
                             /squelch /nav stop
                         }
@@ -1722,18 +1771,7 @@ Sub BeginLooting
                 
                 | Fallback moveto loop for fine positioning or when nav unavailable
 :moveToCorpseLoop
-                | FD check during movement
-                | Always resume E3Next on FD abort (macro paused E3 with /e3p on at start)
-                /if (${Me.Feigning}) {
-                    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Went FD during movement - exiting and resuming E3"
-                    /if (${Me.Grouped}) /docommand /${announceMethod} [FEIGNED] Currently FD and not looting
-                    /e3p off
-                    /deletevar turboLootRunning
-                    /if (${Defined[turboLootSafetyNet]}) /deletevar turboLootSafetyNet
-                    /docommand /lootnodrop ${lootNoDropPromptReset}
-                    /call UnpauseAFollow
-                    /endmac
-                }
+                /call CheckFeignDeath
                 /if (${Target.Distance} <= 10) /goto :doneMoving
                 
                 | Verify target is still our corpse
@@ -1774,7 +1812,11 @@ Sub BeginLooting
                         /loot
                         /delay ${lootWindowDelay} ${Window[LootWnd].Open}
                         /doevents
-                        /if (${Window[LootWnd].Open}) /goto :processItems
+                        /if (${Window[LootWnd].Open}) {
+                            | Skips :doneMoving /loot- must set so done-looting announce fires
+                            /varset DidLoot TRUE
+                            /goto :processItems
+                        }
                         | Still failed - truly stuck, skip and sweep will retry
                         /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Stuck and loot failed - corpse ${Target.ID} at ${Target.Distance} ft, skipping"
                         /echo [turboLoot] WARNING: Stuck running toward corpse ${Target.ID} - likely blocked by wall/obstacle
@@ -1791,7 +1833,7 @@ Sub BeginLooting
                 
                 /face fast
                 /moveto id ${Target.ID} dist 10
-                /delay ${moveLoopDelay}
+                /delay ${moveLoopDelay} ${Target.Distance} <= 10
                 /goto :moveToCorpseLoop
                 
 :doneMoving
@@ -1812,6 +1854,7 @@ Sub BeginLooting
                             /delay ${cursorClearDelay} !${Cursor.ID}
                             /if (${Cursor.ID}) {
                                 /echo [turboLoot] ERROR: Item stuck on cursor after /autoinventory: ${Cursor.Name}. Clear cursor and rerun.
+                                /if (${logToFile}) /call LogError "Item stuck on cursor after autoinventory: ${Cursor.Name}"
                                 /e3p off
                                 /deletevar turboLootRunning
                                 /if (${AlertIndex}) /squelch /alert clear ${AlertIndex}
@@ -1852,10 +1895,10 @@ Sub BeginLooting
                     /if (!${_lootFailCorpseID}) /varset _lootFailCorpseID ${corpseID}
                     | Retarget by ID before retry (Target can be cleared by game/doevents)
                     /target id ${_lootFailCorpseID}
-                    /delay 1
+                    /delay 1 ${Target.ID} == ${_lootFailCorpseID}
                     /if (${Target.ID} != ${_lootFailCorpseID}) {
                         /target id ${_lootFailCorpseID}
-                        /delay 1
+                        /delay 1 ${Target.ID} == ${_lootFailCorpseID}
                     }
                     | Try a small position adjustment and retry
                     /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Loot window failed to open for corpse ${_lootFailCorpseID}, trying position adjustment..."
@@ -1873,10 +1916,10 @@ Sub BeginLooting
                         /if (${tooFarStrikes} < ${tooFarStrikeThreshold}) {
                             | Retarget by ID before retry (Target often cleared when TooFar fires)
                             /target id ${_lootFailCorpseID}
-                            /delay 1
+                            /delay 1 ${Target.ID} == ${_lootFailCorpseID}
                             /if (${Target.ID} != ${_lootFailCorpseID}) {
                                 /target id ${_lootFailCorpseID}
-                                /delay 1
+                                /delay 1 ${Target.ID} == ${_lootFailCorpseID}
                             }
                             /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] TooFar retry: micro-step + re-loot corpse ${_lootFailCorpseID}"
                             /keypress forward hold
@@ -1886,7 +1929,11 @@ Sub BeginLooting
                             /loot
                             /delay ${lootWindowDelay} ${Window[LootWnd].Open}
                             /doevents
-                            /if (${Window[LootWnd].Open}) /goto :processItems
+                            /if (${Window[LootWnd].Open}) {
+                                | Skips :doneMoving /loot- must set so done-looting announce fires
+                                /varset DidLoot TRUE
+                                /goto :processItems
+                            }
                         }
                         | Now it's exceeded threshold, treat like true failure
                         /if (${Target.ID}) /squelch /alert add ${AlertIndex} id ${Target.ID}
@@ -1906,8 +1953,16 @@ Sub BeginLooting
                 /if (${loottotal}<=0 && ${Window[LootWnd].Open}) {
                     /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Corpse.Items=0, waiting for window to populate..."
                 }
-                /while (${loottotal}<=0 && ${_itemWait} < 15 && ${Window[LootWnd].Open}) {
-                    /delay ${If[${fastLootMode},1,2]}
+                /while (${loottotal}<=0 && ${_itemWait} < ${If[${fastLootMode},15,8]} && ${Window[LootWnd].Open}) {
+                    | Graduated wait: start fast, escalate if server is slow to populate
+                    /if (${fastLootMode}) {
+                        /delay 1
+                    } else /if (${_itemWait} < 3) {
+                        /delay 1
+                    } else {
+                        /delay 3
+                    }
+                    /doevents
                     /varset loottotal ${Corpse.Items}
                     /varcalc _itemWait ${_itemWait}+1
                 }
@@ -1928,7 +1983,8 @@ Sub BeginLooting
             }
         }
     } else {
-        /declare msg string local ${FormatMessage[\ar [turboLoot] My Inventory is full!!,${announceMethod}]}
+        /call FormatMessage "\ar [turboLoot] My Inventory is full!!" "${announceMethod}"
+        /declare msg string local ${Macro.Return}
         /docommand /${announceMethod} ${msg}
         /e3p off
         /deletevar turboLootRunning
@@ -1957,6 +2013,7 @@ Sub BeginLooting
     /if (!${_skipCorpseID} && ${corpseID}) /varset _skipCorpseID ${corpseID}
 
     /for lootslot ${loottotal} downto 1
+        /call CheckFeignDeath
         /doevents
         /if (${Cursor.ID}) /call ForceClearCursor
         /if (${LoreBlocked}) {
@@ -1977,12 +2034,12 @@ Sub BeginLooting
             /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Loot window closed unexpectedly during item processing, attempting to reopen corpse ${_reopenCorpseID}"
             /varset _reopenTry 0
             /while (${_reopenCorpseID} && !${Window[LootWnd].Open} && ${_reopenTry} < 4) {
-                | Retarget by ID (Target can be cleared when window closed)
+                /call CheckFeignDeath
                 /target id ${_reopenCorpseID}
-                /delay 1
+                /delay 1 ${Target.ID} == ${_reopenCorpseID}
                 /if (${Target.ID} != ${_reopenCorpseID}) {
                     /target id ${_reopenCorpseID}
-                    /delay 1
+                    /delay 1 ${Target.ID} == ${_reopenCorpseID}
                 }
                 | Small position nudge on retries (may help if TooFar closed the window)
                 /if (${_reopenTry} > 0) {
@@ -2001,7 +2058,7 @@ Sub BeginLooting
                     /goto :processItems
                 }
                 /varcalc _reopenTry ${_reopenTry}+1
-                /if (${_reopenTry} < 4) /delay ${If[${fastLootMode},2,3]}
+                /if (${_reopenTry} < 4) /delay ${If[${fastLootMode},2,3]} ${Window[LootWnd].Open}
             }
             /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Could not reopen loot window, returning to main loop to retarget corpse ${_reopenCorpseID}"
             /goto :mainlootloop
@@ -2015,7 +2072,8 @@ Sub BeginLooting
             /continue
         }
         /varset itemValue ${Math.Calc[${Corpse.Item[${lootslot}].Value} / 1000]}
-        /varset lookupName ${TrimSpaces[${lootName}]}
+        /call TrimSpaces "${lootName}"
+        /varset lookupName ${Macro.Return}
         /varset itemLimit ${Ini[${iniFile},ItemLimits,${lookupName}]}
         /if (!${fastLootMode} && (!${itemLimit.Length} || ${itemLimit.Equal[NULL]})) /varset itemLimit ${Ini[${iniFile},Item Limits,${lookupName}]}
         /if (${itemLimit.Length} && !${itemLimit.Equal[NULL]}) {
@@ -2077,14 +2135,23 @@ Sub BeginLooting
                 /continue
             }
         
-            /varset itemLimit ALL
-            /varset itemLimitUpper WILD
-            /if (${showDebug} || ${logToFile}) /call LogDebug "[DEBUG] Wildcard item - forcing to ALL"
+            | If item has an explicit INI rule (SELL, BANK, TRIBUTE, KEEP, DESTROY, ALL, or numeric),
+            | respect it - let it fall through to the normal INI-driven processing below.
+            | Only force-to-ALL for truly unlisted wildcard items.
+            /if (${itemLimitUpper.Length} && (${itemLimitUpper.Equal[SELL]} || ${itemLimitUpper.Equal[BANK]} || ${itemLimitUpper.Equal[TRIBUTE]} || ${itemLimitUpper.Equal[KEEP]} || ${itemLimitUpper.Equal[ALL]} || ${itemLimitUpper.Equal[DESTROY]} || ${Int[${itemLimit}]} > 0)) {
+                /if (${showDebug} || ${logToFile}) /call LogDebug "[DEBUG] Wildcard item has explicit INI rule (${itemLimitUpper}) - using INI rule instead of wildcard override"
+                | Fall through to normal processing below (HIGH-VALUE -> STACKABLE -> NORMAL INI blocks)
+            } else {
+                | Unlisted wildcard item - force to ALL
+                /varset itemLimit ALL
+                /varset itemLimitUpper WILD
+                /if (${showDebug} || ${logToFile}) /call LogDebug "[DEBUG] Wildcard item (unlisted) - forcing to ALL"
         
-            /call ProcessLootItem ${lootslot} "${itemLimit}"
-            /varset _attemptedLootThisPass TRUE
-            /if (!${Corpse.Item[${lootslot}].ID}) /varset DidLootThisCorpse TRUE
-            /continue
+                /call ProcessLootItem ${lootslot} "${itemLimit}"
+                /varset _attemptedLootThisPass TRUE
+                /if (!${Corpse.Item[${lootslot}].ID}) /varset DidLootThisCorpse TRUE
+                /continue
+            }
         }
         
         | HIGH-VALUE
@@ -2223,7 +2290,10 @@ Sub BeginLooting
 
 
     /if (!${Me.FreeInventory}) {
-        /if (${Me.Grouped} && ${DidLoot}) /call Announce "${announceDoneLootingTo}" "${tlTag} [DONE LOOTING ${corpsesProcessed} CORPSES]"
+        /call ShouldAnnounceDoneLooting
+        /varset _doneLootGate ${Int[${Macro.Return}]}
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] DBG doneLootingGate: ret=${_doneLootGate} DidLoot=${DidLoot} Me.Grouped=${Me.Grouped} announceDoneLootingTo=\"${announceDoneLootingTo}\" corpsesProcessed=${corpsesProcessed} (solo: echo/t/tell/say/rsay; grouped: any incl. gsay/e3bc)"
+        /if (${_doneLootGate}) /call Announce "${announceDoneLootingTo}" "${tlTag} [DONE LOOTING ${corpsesProcessed} CORPSES]"
         /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] No more lootable corpses found. Exiting.""
         | Don't hide on inventory-full exit - we may have left unprocessed corpses
         /if (${AlertIndex}) /squelch /alert clear ${AlertIndex}
@@ -2251,7 +2321,10 @@ Sub BeginLooting
     /if (${endConfirm} < ${If[${fastLootMode},1,2]}) /goto :EndConfirmLoop
 
     /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] No corpses found within ${lootDistance}. Exiting.""
-    /if (${Me.Grouped} && ${DidLoot}) /call Announce "${announceDoneLootingTo}" "${tlTag} [DONE LOOTING ${corpsesProcessed} CORPSES]"
+    /call ShouldAnnounceDoneLooting
+    /varset _doneLootGate ${Int[${Macro.Return}]}
+    /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] DBG doneLootingGate: ret=${_doneLootGate} DidLoot=${DidLoot} Me.Grouped=${Me.Grouped} announceDoneLootingTo=\"${announceDoneLootingTo}\" corpsesProcessed=${corpsesProcessed} (solo: echo/t/tell/say/rsay; gsay/e3bc need group)"
+    /if (${_doneLootGate}) /call Announce "${announceDoneLootingTo}" "${tlTag} [DONE LOOTING ${corpsesProcessed} CORPSES]"
     | Safeguard: wait 2s, check for new unprocessed corpses before hiding (avoids hiding during combat)
     /if (!${corpseHideMode.Equal[OFF]} && !${corpseHideMode.Equal[LOOTED]} && ${DidLoot}) {
         /delay 2
@@ -4340,7 +4413,8 @@ Sub ProcessLootItem(int lootSlot, string limitParam)
                 /declare msg string local ${tlTag} \aw[IGNORE] ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})
                 /varset msg ${msg.Replace[NULL,${thisName}]}
                 /varset msg ${msg.Replace[null,${thisName}]}
-                /declare formattedMsg string local ${FormatMessage[${msg},${announceMethod}]}
+                /call FormatMessage "${msg}" "${announceMethod}"
+                /declare formattedMsg string local ${Macro.Return}
                 /docommand /${announceMethod} ${formattedMsg}
             }
         }
@@ -4408,7 +4482,12 @@ Sub LootHighValueItem(int lootSlot)
     }
     /varset LoreAttemptName "${thisName}"
     
-    /if (${showDebug} || ${announceLooted}) /call Announce "${announceMethod}" "${tlTag} \ag[VALUE] ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]} \at(worth ${Math.Calc[${Corpse.Item[${lootSlot}].Value} / 1000]}pp)"
+    | Cache item link and value BEFORE any loot attempt - in FastLootMode the slot can empty instantly
+    /declare cachedItemLink string local ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]}
+    /if (!${cachedItemLink.Length} || ${cachedItemLink.Equal[NULL]}) /varset cachedItemLink ${thisName}
+    /declare cachedValuePP int local ${Math.Calc[${Corpse.Item[${lootSlot}].Value} / 1000]}
+
+    /if (${showDebug} || ${announceLooted}) /call Announce "${announceMethod}" "${tlTag} \ag[VALUE] ${cachedItemLink} \at(worth ${cachedValuePP}pp)"
 
 :retryHigh
     /varcalc tries ${tries}+1
@@ -4429,6 +4508,7 @@ Sub LootHighValueItem(int lootSlot)
     /if (${fastLootMode}) {
         /varset waitTries 0
 :WaitLootHighFast
+        /call CheckFeignDeath
         /doevents
         /if (${Cursor.ID}) /call ForceClearCursor
         /if (${Window[QuantityWnd].Open}) /call HandleQuantityWindow
@@ -4459,6 +4539,7 @@ Sub LootHighValueItem(int lootSlot)
     /doevents
     /varset waitTries 0
     /while (${Corpse.Item[${lootSlot}].ID} && !${Cursor.ID} && !${LoreBlocked} && ${waitTries} < 15) {
+        /call CheckFeignDeath
         /delay 1
         /doevents
         /varcalc waitTries ${waitTries}+1
@@ -4504,13 +4585,15 @@ Sub LootTheItem(int lootSlot, string thisName, int maxCount, string limitParam)
 
     /varset currentCount ${Math.Calc[${FindItemCount[=${thisName}]}+${FindItemBankCount[=${thisName}]}]}
 
+    | Cache item link BEFORE any loot attempt - in FastLootMode the slot can empty instantly
+    /declare cachedItemLink string local
+    /if (${Corpse.Item[${lootSlot}].ID}) {
+        /varset cachedItemLink ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]}
+    }
+    /if (!${cachedItemLink.Length} || ${cachedItemLink.Equal[NULL]}) /varset cachedItemLink ${thisName}
+
     /if (${currentCount} >= ${maxCount}) {
-        | Check if item still exists in corpse before accessing ItemLink
-        /if (${Corpse.Item[${lootSlot}].ID}) {
-            /call AnnounceSkipped "${Target.ID}:${lootSlot}:${thisName}" "${tlTag} \ar*** LIMIT REACHED ***\aw You have reached your limit of ${maxCount} for ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]} - skipping"
-        } else {
-            /call AnnounceSkipped "${Target.ID}:${lootSlot}:${thisName}" "${tlTag} \ar*** LIMIT REACHED ***\aw You have reached your limit of ${maxCount} for ${thisName} - skipping"
-        }
+        /call AnnounceSkipped "${Target.ID}:${lootSlot}:${thisName}" "${tlTag} \ar*** LIMIT REACHED ***\aw You have reached your limit of ${maxCount} for ${cachedItemLink} - skipping"
         /return
     }
 
@@ -4518,17 +4601,17 @@ Sub LootTheItem(int lootSlot, string thisName, int maxCount, string limitParam)
     
     /if (${showDebug} || ${announceLooted}) {
         /if (${itemLimitUpper.Equal[SELL]}) {
-            /call Announce "${announceMethod}" "${tlTag} \ag[SELL] ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
+            /call Announce "${announceMethod}" "${tlTag} \ag[SELL] ${cachedItemLink} \at(ID: ${Target.ID})"
         } else /if (${itemLimitUpper.Equal[BANK]}) {
-            /call Announce "${announceMethod}" "${tlTag} \ap[BANK] ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
+            /call Announce "${announceMethod}" "${tlTag} \ap[BANK] ${cachedItemLink} \at(ID: ${Target.ID})"
         } else /if (${itemLimitUpper.Equal[TRIBUTE]}) {
-            /call Announce "${announceMethod}" "${tlTag} \ay[TRIBUTE] ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
+            /call Announce "${announceMethod}" "${tlTag} \ay[TRIBUTE] ${cachedItemLink} \at(ID: ${Target.ID})"
         } else /if (${itemLimitUpper.Equal[KEEP]}) {
-            /call Announce "${announceMethod}" "${tlTag} \ag[KEEP] ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
+            /call Announce "${announceMethod}" "${tlTag} \ag[KEEP] ${cachedItemLink} \at(ID: ${Target.ID})"
         } else /if (${itemLimitUpper.Equal[WILD]}) {
-            /call Announce "${announceMethod}" "${tlTag} \at[WILD] ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
+            /call Announce "${announceMethod}" "${tlTag} \at[WILD] ${cachedItemLink} \at(ID: ${Target.ID})"
         } else {
-            /call Announce "${announceMethod}" "${tlTag} \ag[LOOT] ${Corpse.Item[${lootSlot}].ItemLink[CLICKABLE]}"
+            /call Announce "${announceMethod}" "${tlTag} \ag[LOOT] ${cachedItemLink}"
         }
     }
 
@@ -4551,6 +4634,7 @@ Sub LootTheItem(int lootSlot, string thisName, int maxCount, string limitParam)
     /if (${fastLootMode}) {
         /varset waitTries 0
 :WaitLootFast
+        /call CheckFeignDeath
         /doevents
         /if (${Cursor.ID}) /call ForceClearCursor
         /if (${Window[QuantityWnd].Open}) /call HandleQuantityWindow
@@ -4587,6 +4671,7 @@ Sub LootTheItem(int lootSlot, string thisName, int maxCount, string limitParam)
     /doevents
     /varset waitTries 0
     /while (${Corpse.Item[${lootSlot}].ID} && !${Cursor.ID} && !${LoreBlocked} && ${waitTries} < 15) {
+        /call CheckFeignDeath
         /delay 1
         /doevents
         /varcalc waitTries ${waitTries}+1
@@ -4639,10 +4724,11 @@ Sub LootAndDestroyCorpseItem(int lootSlot, string destroyName)
     /if (!${Corpse.Item[${lootSlot}].ID}) /return
 
     /varcalc tries ${tries}+1
-    /if (${tries} >= ${MaxLootRetries}) {
+        /if (${tries} >= ${MaxLootRetries}) {
         /if (${showDebug} || ${announceSkipped}) {
-            /declare msg string local ${FormatMessage[${tlTag} \ar[DESTROY] ${destroyName} \at(ID: ${Target.ID}) - failed ${tries}x,${announceMethod}]}
-            /docommand /${announceMethod} ${msg}
+            /declare destroyFailMsg string local "${tlTag} \ar[DESTROY] ${destroyName} \at(ID: ${Target.ID}) - failed ${tries}x"
+            /call FormatMessage "${destroyFailMsg}" "${announceMethod}"
+            /docommand /${announceMethod} ${Macro.Return}
         }
         | Don't mark entire corpse as skip - just this item failed
         | /squelch /alert add ${AlertIndex} id ${Target.ID}
@@ -4678,9 +4764,15 @@ Sub LootAndDestroyCorpseItem(int lootSlot, string destroyName)
 Sub IsWildcardItem(string name)
     | Checks item name against all prefixes loaded from [Wildcards] INI section.
     | wildcardPrefixes format: |6:SPELL:||5:SONG:||8:TOME OF |
+    | Fast reject: first chars of each prefix in wildcardFirstChars (|S|T|...)
     /if (!${wildcardPrefixes.Length}) /return FALSE
 
     /declare u string local ${name.Upper}
+    /if (!${u.Length}) /return FALSE
+
+    /if (${Defined[wildcardFirstChars]} && ${wildcardFirstChars.Length}) {
+        /if (!${wildcardFirstChars.Find[|${u.Left[1]}|]}) /return FALSE
+    }
     /declare searchPos int local 1
     /declare pipeEnd int local
     /declare entry string local
@@ -4927,6 +5019,18 @@ Sub Event_LoreAlreadyPossessNoName
 /return
 
 
+Sub CheckFeignDeath
+    /if (!${Me.Feigning}) /return
+    /if (${Me.Grouped}) /docommand /${announceMethod} [FEIGNED] Currently FD and not looting
+    /else /echo [turboLoot] Feigned - stopping loot macro
+    /e3p off
+    /deletevar turboLootRunning
+    /if (${Defined[turboLootSafetyNet]}) /deletevar turboLootSafetyNet
+    /call StopFollowAndMovement
+    /call Cleanup
+    /endmac
+/return
+
 | ---------------------------------------------------------------------
 | CLEANUP (end-of-run cleanup)
 | ---------------------------------------------------------------------
@@ -5055,7 +5159,37 @@ Sub TryCloseLootWindow
 Sub LogDebug(string msg)
     /if (!${showDebug} && !${logToFile}) /return
     /if (${showDebug}) /echo ${msg}
-    /if (${logToFile}) /mqlog ${StripColorCodes[${msg}]}
+    /if (${logToFile} && ${logLevel} <= 0) {
+        /call StripColorCodes "${msg}"
+        /mqlog [${Time}] [turboLoot] [DEBUG] ${Macro.Return}
+    }
+/return
+
+| LogInfo: informational; echo when showDebug, file when logToFile and logLevel<=INFO
+Sub LogInfo(string msg)
+    /if (${showDebug}) /echo ${msg}
+    /if (${logToFile} && ${logLevel} <= 1) {
+        /call StripColorCodes "${msg}"
+        /mqlog [${Time}] [turboLoot] [INFO] ${Macro.Return}
+    }
+/return
+
+| LogWarn: always echo (yellow); file when logToFile and logLevel<=WARN
+Sub LogWarn(string msg)
+    /echo ${tlTag} \ay${msg}
+    /if (${logToFile} && ${logLevel} <= 2) {
+        /call StripColorCodes "${msg}"
+        /mqlog [${Time}] [turboLoot] [WARN] ${Macro.Return}
+    }
+/return
+
+| LogError: always echo (red); file when logToFile and logLevel<=ERROR
+Sub LogError(string msg)
+    /echo ${tlTag} \ar${msg}
+    /if (${logToFile} && ${logLevel} <= 3) {
+        /call StripColorCodes "${msg}"
+        /mqlog [${Time}] [turboLoot] [ERROR] ${Macro.Return}
+    }
 /return
 
 Sub StripColorCodes(string msg)
@@ -5078,7 +5212,8 @@ Sub FormatMessage(string msg, string method)
     /if (${methodUpper.Equal[ECHO]} || ${methodUpper.Equal[E3BC]}) {
         /return ${result}
     }
-    /varset result ${StripColorCodes[${result}]}
+    /call StripColorCodes "${result}"
+    /varset result ${Macro.Return}
     /varset result ${result.Replace[[turboLoot] ,]}
     /varset result ${result.Replace[[turboLoot],]}
 /return ${result}
@@ -5113,7 +5248,9 @@ Sub TrimSpaces(string v)
 /return ${result}
 
 Sub NormalizeAnnounceMethod(string v)
-    /declare result string local ${TrimSpaces[${v}]}
+    | /call trims whole string; ${TrimSpaces[${v}]} splits \"t Name\" at the space into two params
+    /call TrimSpaces "${v}"
+    /declare result string local ${Macro.Return}
     /if (${result.Length} && ${result.Left[1].Equal[/]}) /varset result ${result.Right[-1]}
     /declare upper string local ${result.Upper}
     /if (${upper.Left[4].Equal[E3BC]}) /return e3bc
@@ -5121,13 +5258,17 @@ Sub NormalizeAnnounceMethod(string v)
     /if (${upper.Left[3].Equal[SAY]}) /return say
     /if ((${upper.Length} == 1 && ${upper.Equal[G]}) || ${upper.Left[4].Equal[GSAY]}) /return gsay
     /if ((${upper.Length} == 2 && ${upper.Equal[RS]}) || ${upper.Left[4].Equal[RSAY]}) /return rsay
+    | t CharName or tell CharName - preserve for explicit /tell handling in Announce
+    /if (${result.Length} >= 3 && (${upper.Left[2].Equal[T ]} || ${upper.Left[5].Equal[TELL ]})) /return ${result}
     /return ${result}
 
 Sub IniGetStringOrEmpty(string section, string key)
     /declare raw string local ${Ini[${iniFile},${section},${key}]}
     /if (!${raw.Length} || ${raw.Equal[NULL]} || ${raw.Equal[Null]} || ${raw.Equal[null]}) /return ""
-    /declare cleaned string local ${StripIniComment[${raw}]}
-    /declare trimmed string local ${TrimSpaces[${cleaned}]}
+    /call StripIniComment "${raw}"
+    /declare cleaned string local ${Macro.Return}
+    /call TrimSpaces "${cleaned}"
+    /declare trimmed string local ${Macro.Return}
 /return ${trimmed}
 
 
@@ -5135,15 +5276,29 @@ Sub AnnounceBankSell(string msg)
     /if (!${Defined[announceBankSell]} || !${announceBankSell.Length} || ${announceBankSell.Equal[NULL]} || ${announceBankSell.Equal[null]}) {
         /varset announceBankSell "echo"
     }
-    /declare bankSellMethod string local ${NormalizeAnnounceMethod[${announceBankSell}]}
+    /call NormalizeAnnounceMethod "${announceBankSell}"
+    /declare bankSellMethod string local ${Macro.Return}
     /if (!${bankSellMethod.Length}) /varset bankSellMethod "echo"
     /declare bankSellUpper string local ${bankSellMethod.Upper.Replace[ ,]}
     /if (${bankSellUpper.Equal[0]} || ${bankSellUpper.Equal[OFF]}) /return
     /if (${bankSellMethod.Upper.Equal[ECHO]} || ${bankSellMethod.Upper.Equal[E3BC]}) {
         | /squelch hides the "command received:/e3bc ..." spam while still outputting the message.
         /docommand /squelch /${bankSellMethod} ${msg}
+    } else /if (${bankSellMethod.Length} >= 3 && (${bankSellMethod.Left[2].Upper.Equal[T ]} || ${bankSellMethod.Left[5].Upper.Equal[TELL ]})) {
+        /declare bankTellTarget string local
+        /if (${bankSellMethod.Left[2].Upper.Equal[T ]}) {
+            /varset bankTellTarget ${TrimSpaces[${bankSellMethod.Mid[3,500]}]}
+        } else {
+            /varset bankTellTarget ${TrimSpaces[${bankSellMethod.Mid[6,500]}]}
+        }
+        /if (${bankTellTarget.Length}) {
+            /call FormatMessage "${msg}" tell
+            /declare formattedMsg string local ${Macro.Return}
+            /tell ${bankTellTarget} ${formattedMsg}
+        }
     } else {
-        /declare formattedMsg string local ${FormatMessage[${msg},${bankSellMethod}]}
+        /call FormatMessage "${msg}" "${bankSellMethod}"
+        /declare formattedMsg string local ${Macro.Return}
         /docommand /${bankSellMethod} ${formattedMsg}
     }
 /return
@@ -5201,7 +5356,8 @@ Sub AnnounceSkipped(string key, string msg)
         /varset groupMsg ${groupMsg.Replace[[turboLoot],]}
         /call GsayOnce "${key}" "${groupMsg}"
     } else {
-        /declare formattedMsg string local ${FormatMessage[${msg},${effectiveMethod}]}
+        /call FormatMessage "${msg}" "${effectiveMethod}"
+        /declare formattedMsg string local ${Macro.Return}
         /docommand /${effectiveMethod} ${formattedMsg}
     }
 /return
@@ -5341,9 +5497,13 @@ Sub GetHelpAnnounceMethod
     /if (${chosenIni.Length}) {
         /declare raw string local ${Ini[${chosenIni},Settings,announceDefaultTo]}
         /if (${raw.Length} && !${raw.Equal[NULL]} && !${raw.Equal[Null]} && !${raw.Equal[null]}) {
-            /declare cleaned string local ${TrimSpaces[${StripIniComment[${raw}]}]}
+            /call StripIniComment "${raw}"
+            /declare cleaned string local ${Macro.Return}
+            /call TrimSpaces "${cleaned}"
+            /varset cleaned ${Macro.Return}
             /if (${cleaned.Length}) {
-                /declare normalized string local ${NormalizeAnnounceMethod[${cleaned}]}
+                /call NormalizeAnnounceMethod "${cleaned}"
+                /declare normalized string local ${Macro.Return}
                 /if (${normalized.Length}) /varset method ${normalized}
             }
         }
@@ -5354,7 +5514,8 @@ Sub GetHelpAnnounceMethod
 /return ${method}
 
 Sub HelpAnnounce(string method, string msg)
-    /declare m string local ${NormalizeAnnounceMethod[${method}]}
+    /call NormalizeAnnounceMethod "${method}"
+    /declare m string local ${Macro.Return}
     /if (!${m.Length}) /varset m "echo"
     /declare mUpper string local ${m.Upper}
 
@@ -5363,7 +5524,8 @@ Sub HelpAnnounce(string method, string msg)
         /docommand /squelch /${m} ${msg}
     } else {
         | Strip MQ color codes for chat channels
-        /declare plain string local ${StripColorCodes[${msg}]}
+        /call StripColorCodes "${msg}"
+        /declare plain string local ${Macro.Return}
         /docommand /${m} ${plain}
     }
 /return
@@ -5402,11 +5564,34 @@ Sub PrintCommandsAndToggles
 /return
 
 | ---------------------------------------------------------------------
+| Done-looting: grouped = any channel; solo = echo, t/tell, say, rsay (not gsay/e3bc)
+| ---------------------------------------------------------------------
+Sub ShouldAnnounceDoneLooting
+    | Returns 1/0 for /if (${Macro.Return})- TRUE/FALSE strings are unreliable here
+    /if (!${DidLoot}) /return 0
+    /if (${Me.Grouped}) /return 1
+    /call NormalizeAnnounceMethod "${announceDoneLootingTo}"
+    /declare doneLootMethod string local ${Macro.Return}
+    | Tab between t/tell and name breaks Left[2]==\"T \" matching; normalize
+    /varset doneLootMethod ${doneLootMethod.Replace[	, ]}
+    /declare doneU string local ${doneLootMethod.Upper}
+    /if (${doneLootMethod.Length} >= 3 && ${doneLootMethod.Left[2].Upper.Equal[T ]}) /return 1
+    /if (${doneLootMethod.Length} >= 6 && ${doneLootMethod.Left[5].Upper.Equal[TELL ]}) /return 1
+    | Solo: MQ /echo + in-game say/rsay; gsay/e3bc still need Me.Grouped
+    /if (${doneU.Equal[ECHO]}) /return 1
+    /if (${doneU.Equal[SAY]}) /return 1
+    /if (${doneU.Equal[RSAY]} || (${doneLootMethod.Length} == 2 && ${doneU.Equal[RS]})) /return 1
+/return 0
+
+| ---------------------------------------------------------------------
 | ANNOUNCE (logging wrapper)
 | ---------------------------------------------------------------------
 Sub Announce(string method, string msg)
-    /declare methodTrim string local ${NormalizeAnnounceMethod[${method}]}
+    /call NormalizeAnnounceMethod "${method}"
+    /declare methodTrim string local ${Macro.Return}
     /if (!${methodTrim.Length}) /varset methodTrim "echo"
+    | t<TAB>Name breaks tell detection (INI / paste)
+    /varset methodTrim ${methodTrim.Replace[	, ]}
     /declare mUpper string local ${methodTrim.Upper}
     /declare final string local ${msg}
 
@@ -5416,7 +5601,23 @@ Sub Announce(string method, string msg)
         /return
     }
 
-    /declare formatted string local ${FormatMessage[${final},${methodTrim}]}
+    | Explicit /tell handling for t CharName or tell CharName (avoids /docommand parse issues)
+    /declare tellTarget string local
+    /if (${methodTrim.Length} >= 3 && ${methodTrim.Left[2].Upper.Equal[T ]}) {
+        /varset tellTarget ${TrimSpaces[${methodTrim.Mid[3,500]}]}
+    } else /if (${methodTrim.Length} >= 6 && ${methodTrim.Left[5].Upper.Equal[TELL ]}) {
+        /varset tellTarget ${TrimSpaces[${methodTrim.Mid[6,500]}]}
+    }
+    /if (${tellTarget.Length}) {
+        /call FormatMessage "${final}" tell
+        /declare formatted string local ${Macro.Return}
+        /tell ${tellTarget} ${formatted}
+        /return
+    }
+
+    | /call avoids ${FormatMessage[${final},x]} splitting on commas/spaces inside ${final}
+    /call FormatMessage "${final}" "${methodTrim}"
+    /declare formatted string local ${Macro.Return}
     /docommand /${methodTrim} ${formatted}
 /return
 
@@ -5581,6 +5782,7 @@ Sub NavBackToGroupLeader
 | ---------------------------------------------------------------------
 Sub LoadWildcards
     /if (${Defined[wildcardPrefixes]}) /varset wildcardPrefixes ""
+    /if (${Defined[wildcardFirstChars]}) /varset wildcardFirstChars ""
 
     | --- Built-in default prefixes (checked as keys in [Wildcards] section) ---
     /declare wcVal string local
@@ -5592,7 +5794,7 @@ Sub LoadWildcards
         /varset wcUpper ${wcVal.Upper.Replace[ ,]}
         /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
             /varset wildcardPrefixes "${wildcardPrefixes}|6:SPELL:"
-            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: "Spell:" (6 chars)
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: [Spell:] (6 chars)"
         }
     }
 
@@ -5601,7 +5803,7 @@ Sub LoadWildcards
         /varset wcUpper ${wcVal.Upper.Replace[ ,]}
         /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
             /varset wildcardPrefixes "${wildcardPrefixes}|6:SKILL:"
-            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: "Skill:" (6 chars)
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: [Skill:] (6 chars)"
         }
     }
 
@@ -5610,7 +5812,7 @@ Sub LoadWildcards
         /varset wcUpper ${wcVal.Upper.Replace[ ,]}
         /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
             /varset wildcardPrefixes "${wildcardPrefixes}|5:SONG:"
-            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: "Song:" (5 chars)
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: [Song:] (5 chars)"
         }
     }
 
@@ -5619,7 +5821,7 @@ Sub LoadWildcards
         /varset wcUpper ${wcVal.Upper.Replace[ ,]}
         /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
             /varset wildcardPrefixes "${wildcardPrefixes}|5:TOME "
-            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: "Tome " (5 chars)
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: [Tome ] (5 chars)"
         }
     }
 
@@ -5628,7 +5830,7 @@ Sub LoadWildcards
         /varset wcUpper ${wcVal.Upper.Replace[ ,]}
         /if (${wcUpper.Equal[ON]} || ${wcUpper.Equal[TRUE]} || ${wcUpper.Equal[YES]} || ${wcUpper.Equal[1]}) {
             /varset wildcardPrefixes "${wildcardPrefixes}|8:TOME OF "
-            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: "Tome of " (8 chars)
+            /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: [Tome of ] (8 chars)"
         }
     }
 
@@ -5638,11 +5840,12 @@ Sub LoadWildcards
     /for i 1 to 20
         /varset wcVal ${Ini[${iniFile},Wildcards,Wildcard${i}]}
         /if (${wcVal.Length} && !${wcVal.Equal[NULL]} && !${wcVal.Equal[Null]} && !${wcVal.Equal[null]}) {
-            /varset rawPrefix ${StripIniComment[${wcVal}]}
+            /call StripIniComment "${wcVal}"
+            /varset rawPrefix ${Macro.Return}
             /if (${rawPrefix.Length}) {
                 /varset wcLen ${rawPrefix.Length}
                 /varset wildcardPrefixes "${wildcardPrefixes}|${wcLen}:${rawPrefix.Upper}"
-                /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: "${rawPrefix}" (${wcLen} chars)
+                /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard loaded: [${rawPrefix}] (${wcLen} chars)"
             }
         }
     /next i
@@ -5650,6 +5853,33 @@ Sub LoadWildcards
     /if (${wildcardPrefixes.Length}) {
         /varset wildcardPrefixes "${wildcardPrefixes}|"
         /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcards active: ${wildcardPrefixes}"
+
+        | Unique first characters of each prefix- quick reject in IsWildcardItem (FastLoot ON/OFF safe)
+        /varset wildcardFirstChars |
+        /declare fcPos int local 1
+        /declare fcChunk string local
+        /declare fcPipe int local
+        /declare fcEntry string local
+        /declare fcColon int local
+        /declare fcPrefixText string local
+:nextFCWildcard
+        /varset fcPos ${Math.Calc[${fcPos}+1]}
+        /if (${fcPos} >= ${wildcardPrefixes.Length}) /goto :doneFCWildcard
+        /varset fcChunk ${wildcardPrefixes.Mid[${fcPos},500]}
+        /if (!${fcChunk.Length}) /goto :doneFCWildcard
+        /varset fcPipe ${fcChunk.Find[|]}
+        /if (!${fcPipe} || ${fcPipe} < 3) /goto :doneFCWildcard
+        /varset fcEntry ${fcChunk.Left[${Math.Calc[${fcPipe}-1]}]}
+        /varset fcPos ${Math.Calc[${fcPos}+${fcPipe}-1]}
+        /varset fcColon ${fcEntry.Find[:]}
+        /if (!${fcColon}) /goto :nextFCWildcard
+        /varset fcPrefixText ${fcEntry.Mid[${Math.Calc[${fcColon}+1]},1]}
+        /if (${fcPrefixText.Length} && !${wildcardFirstChars.Find[|${fcPrefixText}|]}) {
+            /varset wildcardFirstChars ${wildcardFirstChars}${fcPrefixText}|
+        }
+        /goto :nextFCWildcard
+:doneFCWildcard
+        /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] Wildcard first chars: ${wildcardFirstChars}"
     } else /if (${showDebug} || ${logToFile}) {
         /call LogDebug "[turboLoot] No wildcards loaded from [Wildcards] section."
     }
