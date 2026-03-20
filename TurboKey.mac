@@ -1,7 +1,18 @@
-| TurboKey.mac v3.7.8
+|   *  *  *  *  *  *  *  *  *  *  [  T u r b o K e y  ]  *  *  *  *  *  *  *  *  *  *
+|  _____ _   _____________  _____ _   __ _______   __
+| |_   _| | | | ___ \ ___ \|  _  | | / /|  ___\ \ / /
+|   | | | | | | |_/ / |_/ /| | | | |/ / | |__  \ V /
+|   | | | | | |    /| ___ \| | | |    \ |  __|  \ /
+|   | | | |_| | |\ \| |_/ /\ \_/ / |\  \| |___  | |
+|   \_/  \___/\_| \_\____/  \___/\_| \_/\____/  \_/
+|---------------------------------------------------------------------------------->
+|     https://www.github.com/drel-git/TurboLoot   (INI tag helper)
+|          TurboKey v3.7.9  -  cursor -> [ItemLimits]
+|---------------------------------------------------------------------------------->
+|
 | Usage: /mac TurboKey KEEP|SELL|IGNORE|SKIP|BANK|TRIBUTE|ALL|DESTROY
 | Writes to: turboloot.ini -> [ItemLimits] (same path as TurboLoot)
-| For DESTROY/IGNORE: marks in INI then destroys item on cursor
+| For DESTROY/IGNORE/SKIP: marks in INI then destroys item on cursor
 | For others: marks in INI then /autoinv
 | Overwrites existing rule for the exact same item name
 
