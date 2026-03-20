@@ -102,7 +102,7 @@ If an item matches a `[GiveList]` **_prefix** pattern or shared **`[Wildcards]`*
 
 ```ini
 [GiveExclude]
-_list=Tome of Nife's Mercy|Some Other Item
+_list="Tome of Nife's Mercy"|"Some Other Item Name"
 ```
 
 Use **exact** in-game names, separated by **`|`**. This only blocks **pattern** matches; a normal **`ItemName=Receiver`** line under `[GiveList]` still assigns that item. `/mac turbogive status` shows your `_list` when set.
