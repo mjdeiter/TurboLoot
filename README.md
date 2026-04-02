@@ -228,7 +228,6 @@ Instead of manually editing your INI, pick up an item and run:
 | Rule | Written to `[ItemLimits]` | What happens to the cursor item |
 |------|---------------------------|----------------------------------|
 | `KEEP` | Yes | `/autoinv` |
-| `ALL` | Yes (legacy alias for keep) | `/autoinv` |
 | `SELL` | Yes | `/autoinv` |
 | `BANK` | Yes | `/autoinv` |
 | `TRIBUTE` | Yes | `/autoinv` |
