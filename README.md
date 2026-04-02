@@ -200,15 +200,15 @@ Instead of typing the full commands every time, set up short aliases. Open your 
 
 ```ini
 [Aliases]
-/turboloot=/squelch /mac turboloot
-/turbosell=/squelch /mac turboloot sell
-/turbobank=/squelch /mac turboloot bank
-/turbotribute=/squelch /mac turboloot tribute
-/turbounload=/squelch /mac turboloot unload
-/turboreport=/squelch /mac turboloot report
-/turbodestroy=/squelch /mac turboloot destroy
-/turbohelp=/squelch /mac turboloot help
-/tg=/squelch /mac turbogive
+/turboloot=/mac turboloot
+/turbosell=/mac turboloot sell
+/turbobank=/mac turboloot bank
+/turbotribute=/mac turboloot tribute
+/turbounload=/mac turboloot unload
+/turboreport=/mac turboloot report
+/turbodestroy=/mac turboloot destroy
+/turbohelp=/mac turboloot help
+/tg=/mac turbogive
 ```
 
 Now you can just type `/turboloot`, `/turbosell`, `/turboreport`, etc.
