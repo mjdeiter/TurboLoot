@@ -172,6 +172,7 @@ Sub InitState
     /declare SkipGsayKeys string outer ""
     /declare IgnoreAnnouncedKeys string outer ""
     /declare SkippedAnnouncedKeys string outer ""
+    /declare oocRotAnnouncedKeys string outer ""
     /declare _skipCorpseID int outer 0
     /declare AllSkippedCorpseIds string outer ""
     /declare DidLoot bool outer FALSE
@@ -2100,6 +2101,7 @@ Sub BeginLooting
                 /varset IgnoreAnnouncedKeys "${IgnoreAnnouncedKeys}|${lootName}|"
                 /call Announce "${announceSkippedMethod}" "${tlTag} \aw[IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
             }
+            /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
             /continue
         }
 
@@ -2132,6 +2134,7 @@ Sub BeginLooting
             /if (${itemLimitUpper.Equal[IGNORE]}) {
                 /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] [IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} (ID: ${Target.ID}) Wildcard"
                 /varcalc itemsIgnored ${itemsIgnored}+1
+                /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
                 /continue
             }
         
@@ -2164,6 +2167,7 @@ Sub BeginLooting
             /if (${itemLimitUpper.Equal[IGNORE]}) {
                 /if (${showDebug}) /call Announce "${announceMethod}" "${tlTag} \aw[IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID}) - High value but IGNORE"
                 /varcalc itemsIgnored ${itemsIgnored}+1
+                /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
                 /continue
             }
             /if (${itemLimitUpper.Equal[SELL]} || ${itemLimitUpper.Equal[KEEP]} || ${itemLimitUpper.Equal[BANK]} || ${itemLimitUpper.Equal[TRIBUTE]}) {
@@ -2197,6 +2201,7 @@ Sub BeginLooting
             /if (${itemLimitUpper.Equal[IGNORE]}) {
                 /if (${showDebug}) /call Announce "${announceMethod}" "${tlTag} \aw[IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID}) - Stackable but IGNORE"
                 /varcalc itemsIgnored ${itemsIgnored}+1
+                /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
                 /continue
             }
             /if (${itemLimit.Length} && (${itemLimitUpper.Equal[ALL]} || ${itemLimitUpper.Equal[SELL]} || ${itemLimitUpper.Equal[KEEP]} || ${itemLimitUpper.Equal[BANK]} || ${itemLimitUpper.Equal[TRIBUTE]} || (${Int[${itemLimit}]} > 0))) {
@@ -2239,6 +2244,7 @@ Sub BeginLooting
             | Item is unlisted - skip
             /if (${showDebug} || ${logToFile}) /call LogDebug "[DEBUG] Item ${lootName} is unlisted in INI - skipping""
             /call AnnounceSkipped "${_skipCorpseID}:${lootName}" "${tlTag} \ao[SKIP] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
+            /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
         }
 
     /next lootslot
@@ -5360,6 +5366,30 @@ Sub AnnounceSkipped(string key, string msg)
         /declare formattedMsg string local ${Macro.Return}
         /docommand /${effectiveMethod} ${formattedMsg}
     }
+/return
+
+| ---------------------------------------------------------------------
+| OOC ROT ANNOUNCE
+| Fires a /ooc message when a skipped/ignored item is listed in
+| [OOCRot] in turboloot.ini with a value of 1 (or any non-zero int).
+| Includes a clickable item link and corpse spawn ID so zone players
+| can come loot the item before the corpse decays.
+| Each item fires at most once per session (keyed by corpseID:itemName).
+| Parameters:
+|   %1 = skip key   (string, same key used by AnnounceSkipped)
+|   %2 = item link  (string, from ${Corpse.Item[N].ItemLink[CLICKABLE]})
+|   %3 = corpse ID  (int)
+| ---------------------------------------------------------------------
+Sub OOCRotAnnounce(string skipKey, string itemLink, int cID)
+    /declare oocVal string local ${IniGetStringOrEmpty[OOCRot,${lootName}]}
+    /if (!${oocVal.Length} || !${Int[${oocVal}]}) /return
+
+    | Deduplicate - fire once per corpse+item combo per session
+    /if (${oocRotAnnouncedKeys.Length} > 2000) /varset oocRotAnnouncedKeys ""
+    /if (${oocRotAnnouncedKeys.Length} && ${oocRotAnnouncedKeys.Find[|${skipKey}|]}) /return
+    /varset oocRotAnnouncedKeys "${oocRotAnnouncedKeys}|${skipKey}|"
+
+    /ooc [TurboLoot] ROT AVAILABLE: ${itemLink} -- Corpse ID: ${cID} (/target id ${cID} to loot)
 /return
 
 Sub GsayOnce(string key, string msg)
