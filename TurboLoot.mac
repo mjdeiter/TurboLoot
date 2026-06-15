@@ -172,7 +172,6 @@ Sub InitState
     /declare SkipGsayKeys string outer ""
     /declare IgnoreAnnouncedKeys string outer ""
     /declare SkippedAnnouncedKeys string outer ""
-    /declare oocRotAnnouncedKeys string outer ""
     /declare _skipCorpseID int outer 0
     /declare AllSkippedCorpseIds string outer ""
     /declare DidLoot bool outer FALSE
@@ -270,6 +269,10 @@ Sub InitState
     /declare itemsDestroyed int outer 0
     /declare itemsSkipped int outer 0
     /declare itemsIgnored int outer 0
+    | OOC Rotting Announce
+    /declare oocRottingEnabled bool outer FALSE
+    /declare oocRottingQueue string outer ""
+    /declare oocRotChannel string outer "ooc"
     /declare corpsesProcessed int outer 0
     /declare announceInventoryAlmostFull int outer
     /declare minFreeSlotsDuringLoot int outer 100
@@ -757,6 +760,26 @@ Sub LoadSettings
         }
     } else {
         /varset stopLootWhenAttacked FALSE
+    }
+
+    | oocRotting: announce skipped/rotting items that appear in [OOCList] via /ooc
+    /declare oocRottingSetting string local ${IniGetStringOrEmpty[Settings,oocRotting]}
+    /if (${oocRottingSetting.Length}) {
+        /declare oocRottingUpper string local ${oocRottingSetting.Upper.Replace[ ,]}
+        /if (${oocRottingUpper.Equal[ON]} || ${oocRottingUpper.Equal[TRUE]} || ${oocRottingUpper.Equal[YES]} || ${oocRottingUpper.Equal[1]}) {
+            /varset oocRottingEnabled TRUE
+        } else {
+            /varset oocRottingEnabled FALSE
+        }
+    } else {
+        /varset oocRottingEnabled FALSE
+    }
+
+    /declare oocRotChannelSetting string local ${IniGetStringOrEmpty[Settings,oocRotChannel]}
+    /if (${oocRotChannelSetting.Length}) {
+        /varset oocRotChannel ${oocRotChannelSetting}
+    } else {
+        /varset oocRotChannel "ooc"
     }
 
     | AutoRsayInRaid: auto-switch announce method to rsay when in a raid (default: OFF)
@@ -2101,7 +2124,15 @@ Sub BeginLooting
                 /varset IgnoreAnnouncedKeys "${IgnoreAnnouncedKeys}|${lootName}|"
                 /call Announce "${announceSkippedMethod}" "${tlTag} \aw[IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
             }
-            /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
+            | OOC rot check — queue if this item is in [OOCList]
+            /call CheckOOCList "${lootName}"
+            /if (${Macro.Return}) {
+                /if (${oocRottingQueue.Length}) {
+                    /varset oocRottingQueue "${oocRottingQueue}, ${lootName}"
+                } else {
+                    /varset oocRottingQueue "${lootName}"
+                }
+            }
             /continue
         }
 
@@ -2134,7 +2165,6 @@ Sub BeginLooting
             /if (${itemLimitUpper.Equal[IGNORE]}) {
                 /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] [IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} (ID: ${Target.ID}) Wildcard"
                 /varcalc itemsIgnored ${itemsIgnored}+1
-                /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
                 /continue
             }
         
@@ -2167,7 +2197,6 @@ Sub BeginLooting
             /if (${itemLimitUpper.Equal[IGNORE]}) {
                 /if (${showDebug}) /call Announce "${announceMethod}" "${tlTag} \aw[IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID}) - High value but IGNORE"
                 /varcalc itemsIgnored ${itemsIgnored}+1
-                /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
                 /continue
             }
             /if (${itemLimitUpper.Equal[SELL]} || ${itemLimitUpper.Equal[KEEP]} || ${itemLimitUpper.Equal[BANK]} || ${itemLimitUpper.Equal[TRIBUTE]}) {
@@ -2201,7 +2230,6 @@ Sub BeginLooting
             /if (${itemLimitUpper.Equal[IGNORE]}) {
                 /if (${showDebug}) /call Announce "${announceMethod}" "${tlTag} \aw[IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID}) - Stackable but IGNORE"
                 /varcalc itemsIgnored ${itemsIgnored}+1
-                /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
                 /continue
             }
             /if (${itemLimit.Length} && (${itemLimitUpper.Equal[ALL]} || ${itemLimitUpper.Equal[SELL]} || ${itemLimitUpper.Equal[KEEP]} || ${itemLimitUpper.Equal[BANK]} || ${itemLimitUpper.Equal[TRIBUTE]} || (${Int[${itemLimit}]} > 0))) {
@@ -2244,7 +2272,6 @@ Sub BeginLooting
             | Item is unlisted - skip
             /if (${showDebug} || ${logToFile}) /call LogDebug "[DEBUG] Item ${lootName} is unlisted in INI - skipping""
             /call AnnounceSkipped "${_skipCorpseID}:${lootName}" "${tlTag} \ao[SKIP] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
-            /call OOCRotAnnounce "${_skipCorpseID}:${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${_skipCorpseID}
         }
 
     /next lootslot
@@ -5368,30 +5395,6 @@ Sub AnnounceSkipped(string key, string msg)
     }
 /return
 
-| ---------------------------------------------------------------------
-| OOC ROT ANNOUNCE
-| Fires a /ooc message when a skipped/ignored item is listed in
-| [OOCRot] in turboloot.ini with a value of 1 (or any non-zero int).
-| Includes a clickable item link and corpse spawn ID so zone players
-| can come loot the item before the corpse decays.
-| Each item fires at most once per session (keyed by corpseID:itemName).
-| Parameters:
-|   %1 = skip key   (string, same key used by AnnounceSkipped)
-|   %2 = item link  (string, from ${Corpse.Item[N].ItemLink[CLICKABLE]})
-|   %3 = corpse ID  (int)
-| ---------------------------------------------------------------------
-Sub OOCRotAnnounce(string skipKey, string itemLink, int cID)
-    /declare oocVal string local ${IniGetStringOrEmpty[OOCRot,${lootName}]}
-    /if (!${oocVal.Length} || !${Int[${oocVal}]}) /return
-
-    | Deduplicate - fire once per corpse+item combo per session
-    /if (${oocRotAnnouncedKeys.Length} > 2000) /varset oocRotAnnouncedKeys ""
-    /if (${oocRotAnnouncedKeys.Length} && ${oocRotAnnouncedKeys.Find[|${skipKey}|]}) /return
-    /varset oocRotAnnouncedKeys "${oocRotAnnouncedKeys}|${skipKey}|"
-
-    /ooc [TurboLoot] ROT AVAILABLE: ${itemLink} -- Corpse ID: ${cID} (/target id ${cID} to loot)
-/return
-
 Sub GsayOnce(string key, string msg)
     /if (!${Me.Grouped}) /return
     /if (${SkipGsayKeys.Length} > 2000) /varset SkipGsayKeys ""
@@ -5427,6 +5430,33 @@ Sub PrintSummary
     } else /if (${minFreeSlotsDuringLoot} <= ${Math.Calc[3 * ${announceInventoryAlmostFull}]}) {
         /call Announce "${announceSummaryMethod}" "${tlTag} \ayWARNING: ${minFreeSlotsDuringLoot} spaces remaining (threshold: ${announceInventoryAlmostFull})"
     }
+    | Announce any rotting items from [OOCList]
+    /call AnnounceOOCRotting
+/return
+
+| ---------------------------------------------------------------------
+| CHECK OOC LIST
+| Returns TRUE if the given item name is in [OOCList] and should be
+| announced via /ooc when found rotting.
+| ---------------------------------------------------------------------
+Sub CheckOOCList(string checkItemName)
+    /if (!${oocRottingEnabled}) /return FALSE
+    /declare oocEntry string local ${Ini[${iniFile},OOCList,${checkItemName}]}
+    /if (!${oocEntry.Length} || ${oocEntry.Equal[NULL]} || ${oocEntry.Equal[Null]}) /return FALSE
+    /declare oocEntryUpper string local ${oocEntry.Upper.Replace[ ,]}
+    /if (${oocEntryUpper.Equal[OFF]} || ${oocEntryUpper.Equal[NO]} || ${oocEntryUpper.Equal[0]}) /return FALSE
+/return TRUE
+
+| ---------------------------------------------------------------------
+| ANNOUNCE OOC ROTTING
+| Sends all queued rotting items to the configured channel.
+| Called from PrintSummary at end of loot run.
+| ---------------------------------------------------------------------
+Sub AnnounceOOCRotting
+    /if (!${oocRottingEnabled}) /return
+    /if (!${oocRottingQueue.Length}) /return
+    /${oocRotChannel} [TurboLoot] Rotting: ${oocRottingQueue}
+    /varset oocRottingQueue ""
 /return
 
 | ---------------------------------------------------------------------
