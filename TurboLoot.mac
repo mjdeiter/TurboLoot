@@ -273,6 +273,11 @@ Sub InitState
     /declare announceInventoryAlmostFull int outer
     /declare minFreeSlotsDuringLoot int outer 100
     /declare BankContainerWarnedKeys string outer ""
+
+    | OOC Announce
+    /declare oocAnnounceEnabled bool outer FALSE
+    /declare oocChannel string outer "ooc"
+    /declare oocMessage string outer "Dropping:"
 /return
 
 || ---------------------------------------------------------------------
@@ -650,6 +655,31 @@ Sub LoadSettingsMinimal(string modeParam)
         }
     } else {
         /varset dropLevBeforeNav TRUE
+    }
+
+    | oocAnnounce settings
+    /declare oocAnnounceSetting string local ${IniGetStringOrEmpty[Settings,oocAnnounce]}
+    /if (${oocAnnounceSetting.Length}) {
+        /declare oocAnnounceUpper string local ${oocAnnounceSetting.Upper.Replace[ ,]}
+        /if (${oocAnnounceUpper.Equal[ON]} || ${oocAnnounceUpper.Equal[TRUE]} || ${oocAnnounceUpper.Equal[YES]} || ${oocAnnounceUpper.Equal[1]}) {
+            /varset oocAnnounceEnabled TRUE
+        } else {
+            /varset oocAnnounceEnabled FALSE
+        }
+    } else {
+        /varset oocAnnounceEnabled FALSE
+    }
+    /declare oocChannelSetting string local ${IniGetStringOrEmpty[Settings,oocChannel]}
+    /if (${oocChannelSetting.Length}) {
+        /varset oocChannel ${oocChannelSetting}
+    } else {
+        /varset oocChannel "ooc"
+    }
+    /declare oocMessageSetting string local ${IniGetStringOrEmpty[Settings,oocMessage]}
+    /if (${oocMessageSetting.Length}) {
+        /varset oocMessage ${oocMessageSetting}
+    } else {
+        /varset oocMessage "Dropping:"
     }
 
     /call LoadWildcards
@@ -2090,6 +2120,9 @@ Sub BeginLooting
         }
         /if (${showDebug} || ${logToFile}) /call LogDebug "[DEBUG] Item ${lootName} - INI lookup returned: "${itemLimit}" -> itemLimitUpper: "${itemLimitUpper}"
         /if ((${showDebug} || ${logToFile}) && ${itemLimitUpper.Equal[SELL]}) /call LogDebug "[DEBUG] Found SELL item: ${lootName} - itemLimit=\"${itemLimit}\" itemLimitUpper=\"${itemLimitUpper}\""
+
+        | OOC ANNOUNCE (fires once per item regardless of disposition)
+        /if (${oocAnnounceEnabled}) /call CheckOOCList "${lootName}" "${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]}" ${Target.ID}
 
         | IGNORE
         /if (${itemLimitUpper.Equal[IGNORE]}) {
@@ -5313,6 +5346,19 @@ Sub AnnounceBankSellProgress(string msg)
 
 Sub AnnounceBankSellPerItem(string msg)
     /call AnnounceBankSell "${msg}"
+/return
+
+Sub CheckOOCList(string itemName, string itemLink, int corpseID)
+    | Check if itemName appears in [OOCList] section of the INI.
+    | If found, fire an immediate /ooc announcement with the clickable link.
+    /declare oocVal string local ${Ini[${iniFile},OOCList,${itemName}]}
+    /if (!${oocVal.Length} || ${oocVal.Equal[NULL]} || ${oocVal.Equal[null]}) /return
+    /call AnnounceOOCItem "${itemLink}" ${corpseID}
+/return
+
+Sub AnnounceOOCItem(string itemLink, int corpseID)
+    | Immediately announces to the configured channel with the configurable message.
+    /${oocChannel} ${oocMessage} ${itemLink} (Corpse: ${corpseID})
 /return
 
 Sub AnnounceSkipped(string key, string msg)
