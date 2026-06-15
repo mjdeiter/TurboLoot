@@ -269,6 +269,10 @@ Sub InitState
     /declare itemsDestroyed int outer 0
     /declare itemsSkipped int outer 0
     /declare itemsIgnored int outer 0
+    | OOC Rotting Announce
+    /declare oocRottingEnabled bool outer FALSE
+    /declare oocRottingQueue string outer ""
+    /declare oocRotChannel string outer "ooc"
     /declare corpsesProcessed int outer 0
     /declare announceInventoryAlmostFull int outer
     /declare minFreeSlotsDuringLoot int outer 100
@@ -786,6 +790,26 @@ Sub LoadSettings
         }
     } else {
         /varset stopLootWhenAttacked FALSE
+    }
+
+    | oocRotting: announce skipped/rotting items in [OOCList] via /ooc
+    /declare oocRottingSetting string local ${IniGetStringOrEmpty[Settings,oocRotting]}
+    /if (${oocRottingSetting.Length}) {
+        /declare oocRottingUpper string local ${oocRottingSetting.Upper.Replace[ ,]}
+        /if (${oocRottingUpper.Equal[ON]} || ${oocRottingUpper.Equal[TRUE]} || ${oocRottingUpper.Equal[YES]} || ${oocRottingUpper.Equal[1]}) {
+            /varset oocRottingEnabled TRUE
+        } else {
+            /varset oocRottingEnabled FALSE
+        }
+    } else {
+        /varset oocRottingEnabled FALSE
+    }
+
+    /declare oocRotChannelSetting string local ${IniGetStringOrEmpty[Settings,oocRotChannel]}
+    /if (${oocRotChannelSetting.Length}) {
+        /varset oocRotChannel ${oocRotChannelSetting}
+    } else {
+        /varset oocRotChannel "ooc"
     }
 
     | AutoRsayInRaid: auto-switch announce method to rsay when in a raid (default: OFF)
@@ -2132,6 +2156,15 @@ Sub BeginLooting
             /if (${showDebug} && ${announceSkipped} && !${IgnoreAnnouncedKeys.Find[|${lootName}|]}) {
                 /varset IgnoreAnnouncedKeys "${IgnoreAnnouncedKeys}|${lootName}|"
                 /call Announce "${announceSkippedMethod}" "${tlTag} \aw[IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
+            }
+            | OOC rot check - queue if this item is in [OOCList]
+            /call CheckOOCListForRot "${lootName}"
+            /if (${Macro.Return}) {
+                /if (${oocRottingQueue.Length}) {
+                    /varset oocRottingQueue "${oocRottingQueue}, ${lootName}"
+                } else {
+                    /varset oocRottingQueue "${lootName}"
+                }
             }
             /continue
         }
@@ -5361,6 +5394,31 @@ Sub AnnounceOOCItem(string itemLink, int corpseID)
     /${oocChannel} ${oocMessage} ${itemLink} (Corpse: ${corpseID})
 /return
 
+| ---------------------------------------------------------------------
+| CHECK OOC LIST FOR ROT
+| Returns TRUE if item is in [OOCList] and oocRottingEnabled is ON.
+| Called from the IGNORE block to queue rotting items.
+| ---------------------------------------------------------------------
+Sub CheckOOCListForRot(string checkItemName)
+    /if (!${oocRottingEnabled}) /return FALSE
+    /declare oocEntry string local ${Ini[${iniFile},OOCList,${checkItemName}]}
+    /if (!${oocEntry.Length} || ${oocEntry.Equal[NULL]} || ${oocEntry.Equal[Null]}) /return FALSE
+    /declare oocEntryUpper string local ${oocEntry.Upper.Replace[ ,]}
+    /if (${oocEntryUpper.Equal[OFF]} || ${oocEntryUpper.Equal[NO]} || ${oocEntryUpper.Equal[0]}) /return FALSE
+/return TRUE
+
+| ---------------------------------------------------------------------
+| ANNOUNCE OOC ROTTING
+| Sends all queued rotting items to the configured channel at end of run.
+| Called from PrintSummary.
+| ---------------------------------------------------------------------
+Sub AnnounceOOCRotting
+    /if (!${oocRottingEnabled}) /return
+    /if (!${oocRottingQueue.Length}) /return
+    /${oocRotChannel} [TurboLoot] Rotting: ${oocRottingQueue}
+    /varset oocRottingQueue ""
+/return
+
 Sub AnnounceSkipped(string key, string msg)
     /if (${SkippedAnnouncedKeys.Length} > 2000) /varset SkippedAnnouncedKeys ""
     /if (${SkippedAnnouncedKeys.Length} && ${SkippedAnnouncedKeys.Find[|${key}|]}) /return
@@ -5443,6 +5501,8 @@ Sub PrintSummary
     } else /if (${minFreeSlotsDuringLoot} <= ${Math.Calc[3 * ${announceInventoryAlmostFull}]}) {
         /call Announce "${announceSummaryMethod}" "${tlTag} \ayWARNING: ${minFreeSlotsDuringLoot} spaces remaining (threshold: ${announceInventoryAlmostFull})"
     }
+    | Announce any rotting items from [OOCList]
+    /call AnnounceOOCRotting
 /return
 
 | ---------------------------------------------------------------------
