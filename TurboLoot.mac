@@ -2153,7 +2153,7 @@ Sub BeginLooting
             /varcalc itemsIgnored ${itemsIgnored}+1
             /if (${showDebug} || ${logToFile}) /call LogDebug "[turboLoot] [IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
             /if (${IgnoreAnnouncedKeys.Length} > 2000) /varset IgnoreAnnouncedKeys ""
-            /if (${showDebug} && ${announceSkipped} && !${IgnoreAnnouncedKeys.Find[|${lootName}|]}) {
+            /if ((${showDebug} || ${announceSkipped}) && !${IgnoreAnnouncedKeys.Find[|${lootName}|]}) {
                 /varset IgnoreAnnouncedKeys "${IgnoreAnnouncedKeys}|${lootName}|"
                 /call Announce "${announceSkippedMethod}" "${tlTag} \aw[IGNORE] ${Corpse.Item[${lootslot}].ItemLink[CLICKABLE]} \at(ID: ${Target.ID})"
             }
