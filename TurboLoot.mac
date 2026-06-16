@@ -4677,7 +4677,7 @@ Sub LootTheItem(int lootSlot, string thisName, int maxCount, string limitParam)
         } else /if (${itemLimitUpper.Equal[WILD]}) {
             /call Announce "${announceMethod}" "${tlTag} \at[WILD] ${cachedItemLink} \at(ID: ${Target.ID})"
         } else {
-            /call Announce "${announceMethod}" "${tlTag} \ag[LOOT] ${cachedItemLink}"
+            /call Announce "${announceMethod}" "${tlTag} \ag[LOOT] ${cachedItemLink} \at(ID: ${Target.ID})"
         }
     }
 
